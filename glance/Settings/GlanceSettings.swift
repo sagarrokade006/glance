@@ -109,6 +109,7 @@ final class GlanceSettings {
         static let matchThreshold = "GlanceSettings.matchThreshold"
         static let livenessChecksEnabled = "GlanceSettings.livenessChecksEnabled"
         static let livenessMode = "GlanceSettings.livenessMode"
+        static let requiresAttention = "GlanceSettings.requiresAttention"
         static let minimumFaceWidth = "GlanceSettings.minimumFaceWidth"
         static let unlockAnimationStyle = "GlanceSettings.unlockAnimationStyle"
         static let showUnlockAnimation = "GlanceSettings.showUnlockAnimation"
@@ -151,6 +152,10 @@ final class GlanceSettings {
     /// see `LivenessMode`.
     var livenessMode: LivenessMode {
         didSet { defaults.set(livenessMode.rawValue, forKey: Key.livenessMode) }
+    }
+    /// Requires open eyes and a face turned toward the screen, so being in frame isn't enough to unlock.
+    var requiresAttention: Bool {
+        didSet { defaults.set(requiresAttention, forKey: Key.requiresAttention) }
     }
     /// Mirrored into `FaceRecognitionPipeline.minimumProminentFaceWidth` on
     /// every change, since that's read from a background `nonisolated` context.
@@ -298,6 +303,7 @@ final class GlanceSettings {
         // catches the main attack (a photo on a phone screen).
         livenessMode = defaults.string(forKey: Key.livenessMode)
             .flatMap(LivenessMode.init(rawValue:)) ?? .light
+        requiresAttention = defaults.object(forKey: Key.requiresAttention) as? Bool ?? true
         // Matches `DetectionDistanceLevel.standard` — see RecognitionSettingsPage.swift.
         minimumFaceWidth = defaults.object(forKey: Key.minimumFaceWidth) as? Float ?? 0.21
 

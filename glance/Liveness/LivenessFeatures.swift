@@ -29,7 +29,8 @@ nonisolated enum LivenessFeatureExtractor {
                 noseOffsetRatio: nil,
                 hasReliableLandmarks: false,
                 deviceOverlapFraction: deviceOverlap,
-                glare: glare
+                glare: glare,
+                pitch: face.pitch
             )
         }
 
@@ -58,7 +59,8 @@ nonisolated enum LivenessFeatureExtractor {
             noseOffsetRatio: noseOffsetRatio,
             hasReliableLandmarks: result.alignmentTier == .fivePoint,
             deviceOverlapFraction: deviceOverlap,
-            glare: glare
+            glare: glare,
+            pitch: face.pitch
         )
     }
 }

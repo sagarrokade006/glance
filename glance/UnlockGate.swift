@@ -31,8 +31,28 @@ struct UnlockGatePolicy: Equatable {
     var wrongFaceGrace: TimeInterval = 2
     /// Frames older than this are ignored, so nothing from an earlier moment can be scored as current.
     var maxFrameAge: TimeInterval = 0.5
+    /// When on, a match only counts while the eyes are open and the face is turned toward the screen.
+    var requiresAttention = false
+    /// About 20 degrees, in radians, matching Vision's head-pose units.
+    var maxAttentiveYaw: Float = 0.35
+    var maxAttentivePitch: Float = 0.35
+    /// Height-to-width ratio of the eye outline. Set low because Vision never fully collapses a closed eye.
+    var minEyeOpenness: CGFloat = 0.17
 
     static let standard = UnlockGatePolicy()
+
+    /// Unknown measurements count as not attentive, so missing landmarks can't satisfy the check.
+    func isAttentive(_ frame: LivenessFrame) -> Bool {
+        guard let yaw = frame.yaw,
+              let leftEye = frame.leftEyeAspectRatio,
+              let rightEye = frame.rightEyeAspectRatio,
+              abs(yaw) <= maxAttentiveYaw,
+              leftEye >= minEyeOpenness,
+              rightEye >= minEyeOpenness
+        else { return false }
+        if let pitch = frame.pitch, abs(pitch) > maxAttentivePitch { return false }
+        return true
+    }
 
     func classify(isMatch: Bool, bestSimilarity: Float?) -> UnlockFaceClass {
         if isMatch { return .match }
@@ -104,6 +124,10 @@ final class UnlockGate {
         }
 
         wrongFaceStartedAt = nil
+        guard !policy.requiresAttention || policy.isAttentive(frame) else {
+            matchStreak = 0
+            return .keepScanning
+        }
         matchStreak += 1
         guard matchStreak >= policy.requiredConsecutiveMatches, isLive else { return .keepScanning }
         return .unlock(confirmedBy: confirmingCue)

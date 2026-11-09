@@ -99,6 +99,7 @@ struct UnlockGateSelfTest {
         testFaceGaps()
         testWrongFace()
         testFrameFreshnessAndClassification()
+        testAttention()
         testAttemptLimiter()
         testSessionExpiry()
         testInjectionPlan()
@@ -225,6 +226,48 @@ struct UnlockGateSelfTest {
         check(policy.classify(isMatch: false, bestSimilarity: 0.2) == .impostor, "Below the floor is an impostor")
         check(policy.classify(isMatch: false, bestSimilarity: nil) == .impostor, "No comparable identity is an impostor")
         check(policy.plausibleOwnerFloor < 0.58, "The plausible floor sits below every selectable threshold")
+    }
+
+    @MainActor
+    private static func testAttention() {
+        var policy = UnlockGatePolicy.standard
+        policy.requiresAttention = true
+
+        func frame(yaw: Float? = 0, pitch: Float? = 0, eyes: CGFloat? = 0.3, at time: Date) -> LivenessFrame {
+            LivenessFrame(
+                timestamp: time, landmarks: [], interocularDistance: nil, yaw: yaw,
+                leftEyeAspectRatio: eyes, rightEyeAspectRatio: eyes, noseOffsetRatio: nil,
+                hasReliableLandmarks: false, deviceOverlapFraction: nil, pitch: pitch
+            )
+        }
+
+        check(policy.isAttentive(frame(at: start)), "Open eyes facing the screen are attentive")
+        check(!policy.isAttentive(frame(eyes: 0.05, at: start)), "Closed eyes are not attentive")
+        check(!policy.isAttentive(frame(yaw: 0.6, at: start)), "Looking away sideways is not attentive")
+        check(!policy.isAttentive(frame(pitch: 0.6, at: start)), "Looking down is not attentive")
+        check(!policy.isAttentive(frame(yaw: nil, at: start)), "Unknown head pose is not attentive")
+        check(!policy.isAttentive(frame(eyes: nil, at: start)), "Unknown eye state is not attentive")
+
+        func feed(_ gate: UnlockGate, eyes: CGFloat, count: Int, from first: Int) -> UnlockGate.Decision {
+            var decision = UnlockGate.Decision.keepScanning
+            for index in first..<(first + count) {
+                let time = start + Double(index) * frameInterval
+                decision = gate.observeFace(.match, frame: frame(eyes: eyes, at: time), at: time)
+            }
+            return decision
+        }
+
+        let asleep = UnlockGate(policy: policy, liveness: nil)
+        check(feed(asleep, eyes: 0.05, count: 30, from: 0) == .keepScanning, "A matching face with closed eyes never unlocks")
+
+        let attentive = UnlockGate(policy: policy, liveness: nil)
+        check(feed(attentive, eyes: 0.3, count: 3, from: 0) == .unlock(confirmedBy: nil), "A matching attentive face unlocks")
+
+        let interrupted = UnlockGate(policy: policy, liveness: nil)
+        _ = feed(interrupted, eyes: 0.3, count: 2, from: 0)
+        _ = feed(interrupted, eyes: 0.05, count: 1, from: 2)
+        check(feed(interrupted, eyes: 0.3, count: 2, from: 3) == .keepScanning, "Looking away restarts the consecutive count")
+        check(feed(interrupted, eyes: 0.3, count: 1, from: 5) == .unlock(confirmedBy: nil), "Attention must hold for the full count")
     }
 
     @MainActor

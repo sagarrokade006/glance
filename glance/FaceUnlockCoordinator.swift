@@ -425,7 +425,9 @@ final class FaceUnlockCoordinator {
         let livenessEnabled = GlanceSettings.shared.livenessChecksEnabled
         let liveness = LivenessAnalyzer()
         liveness.modeProvider = { GlanceSettings.shared.livenessMode }
-        let gate = UnlockGate(liveness: livenessEnabled ? liveness : nil)
+        var policy = UnlockGatePolicy.standard
+        policy.requiresAttention = GlanceSettings.shared.requiresAttention
+        let gate = UnlockGate(policy: policy, liveness: livenessEnabled ? liveness : nil)
         /// Last frame's selected face, passed back so `selectDominantFace` stays on the same person instead of flip-flopping.
         var lastFaceBoundingBox: CGRect?
         /// Cheap way to detect "no new camera frame yet" vs. "fresh frame" — without it a repeat frame would corrupt the liveness motion signal.

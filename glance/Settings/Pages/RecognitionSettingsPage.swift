@@ -89,6 +89,14 @@ struct RecognitionSettingsPage: View {
                         selection: $settings.livenessMode,
                         isEnabled: settings.livenessChecksEnabled
                     )
+                    SettingsGroupDivider()
+                    SettingsRowContent(
+                        title: "Require attention",
+                        subtitle: "Only unlock when your eyes are open and you're facing the screen.",
+                        subtitleMaxWidth: SettingsMetrics.rowSubtitleMaxWidth
+                    ) {
+                        GlanceToggle(isOn: $settings.requiresAttention)
+                    }
                 }
             }
         }
