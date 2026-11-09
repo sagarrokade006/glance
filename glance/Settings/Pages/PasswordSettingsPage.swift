@@ -8,6 +8,7 @@ import SwiftUI
 struct PasswordSettingsPage: View {
     @Bindable var pocController: POCController
     @Bindable private var settings = GlanceSettings.shared
+    private var health: PasswordHealth { PasswordHealthStore.shared.health }
 
     @State private var isUnlocking = false
     @State private var sessionError: String?
@@ -50,7 +51,10 @@ struct PasswordSettingsPage: View {
                 .accessibilityHidden(pageState != .unlocked)
         }
         .animation(SettingsMetrics.stateTransitionAnimation, value: pageState)
-        .onAppear { pocController.refreshCredentialStatus() }
+        .onAppear {
+            pocController.refreshCredentialStatus()
+            pocController.refreshAccessibilityStatus()
+        }
         // The onboarding password step runs in the notch, outside this
         // view's hierarchy, so nothing else prompts a re-check once it closes.
         .onChange(of: NotchOverlayController.shared.phase) { _, newPhase in
@@ -89,6 +93,10 @@ struct PasswordSettingsPage: View {
 
     private var unlockedState: some View {
         VStack(alignment: .leading, spacing: SettingsMetrics.rowSpacing) {
+            if health.isStale {
+                staleWarning
+            }
+
             SettingsGroup {
                 SettingsRowContent(title: "Password encrypted") {
                     Image(systemName: "lock.fill")
@@ -126,7 +134,80 @@ struct PasswordSettingsPage: View {
             if let statusMessage {
                 SettingsCaption(text: statusMessage)
             }
+
+            SettingsSectionTitle(text: "Password health")
+            SettingsGroup {
+                SettingsRowContent(title: "Last verified with macOS") {
+                    healthValue(formatted(health.lastVerifiedAt, fallback: "Not verified"))
+                }
+                SettingsGroupDivider()
+                SettingsRowContent(title: "Last successful unlock") {
+                    healthValue(formatted(health.lastSuccessfulUnlockAt, fallback: "Not yet"))
+                }
+                SettingsGroupDivider()
+                SettingsRowContent(title: "Accessibility permission") {
+                    Image(systemName: pocController.accessibilityGranted ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(pocController.accessibilityGranted ? .green : .red)
+                }
+                SettingsGroupDivider()
+                SettingsRowContent(title: "Session re-locks in") {
+                    healthValue(sessionTimeRemaining)
+                }
+                if !health.isStale {
+                    SettingsGroupDivider()
+                    checkPasswordRow
+                }
+            }
         }
+    }
+
+    private var staleWarning: some View {
+        SettingsGroup {
+            SettingsRowContent(
+                title: "Stored password looks out of date",
+                subtitle: "macOS didn't accept it. Face unlock is paused to avoid failed login attempts.",
+                subtitleMaxWidth: SettingsMetrics.rowSubtitleMaxWidth
+            ) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+            SettingsGroupDivider()
+            SettingsRowContent(title: "Update password") {
+                SettingsPrimaryButton(title: "Update", compact: true) {
+                    OnboardingController.startPasswordOnly()
+                }
+            }
+            SettingsGroupDivider()
+            checkPasswordRow
+        }
+    }
+
+    private var checkPasswordRow: some View {
+        SettingsActionRowContent(
+            title: "Check stored password",
+            buttonTitle: pocController.isCheckingPassword ? "Checking…" : "Check",
+            isEnabled: !pocController.isCheckingPassword
+        ) {
+            Task { await pocController.checkStoredPassword() }
+        }
+    }
+
+    private func healthValue(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13))
+            .foregroundStyle(SettingsMetrics.textSecondary)
+    }
+
+    private func formatted(_ date: Date?, fallback: String) -> String {
+        date?.formatted(date: .abbreviated, time: .shortened) ?? fallback
+    }
+
+    private var sessionTimeRemaining: String {
+        guard let limit = settings.autoLockInterval.duration,
+              let startedAt = SecureCredentialManager.sessionStartedAt
+        else { return "Never" }
+        let hours = max(0, Int((limit - Date().timeIntervalSince(startedAt)) / 3600))
+        if hours >= 48 { return "\(hours / 24) days" }
+        return hours == 1 ? "1 hour" : "\(hours) hours"
     }
 
     // MARK: - Actions

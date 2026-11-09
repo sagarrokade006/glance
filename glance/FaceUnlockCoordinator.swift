@@ -38,6 +38,9 @@ final class FaceUnlockCoordinator {
     /// Failed scans at the current lock screen. Cleared only by a confirmed real unlock, so waking the display can't reset it.
     private var attemptLimiter = UnlockAttemptLimiter()
     private var handledUnlockEventCount = 0
+    /// Not `scanTask`: unlocking disarms and cancels the scan, and this must still see the result. Also blocks a second
+    /// scan from typing again while macOS is still deciding about the first.
+    private var passwordConfirmationTask: Task<Void, Never>?
 
     private(set) var statusMessage = "Idle"
     private(set) var lastOutcome: String?
@@ -151,6 +154,9 @@ final class FaceUnlockCoordinator {
         if pipeline.usingFallbackEmbedder {
             return "Face unlock is off because the recognition model couldn't be loaded."
         }
+        if PasswordHealthStore.shared.health.isStale {
+            return "Your stored password looks out of date — update it in Settings to use face unlock."
+        }
         if attemptLimiter.isLockedOut {
             return "Too many failed attempts — enter your password to use face unlock again."
         }
@@ -243,6 +249,7 @@ final class FaceUnlockCoordinator {
 
     /// Called on arm, and again whenever the overlay hover-activates.
     private func startScanCycle() {
+        guard passwordConfirmationTask == nil else { return }
         // Hover and auto-retry reach here directly. Disarming removes the hover target instead of leaving a dead notch.
         if let scanBlockedReason {
             statusMessage = scanBlockedReason
@@ -315,6 +322,12 @@ final class FaceUnlockCoordinator {
             } else {
                 scheduleAutoRetryIfEnabled(after: headlessRetryDelay)
             }
+        case .passwordEntryFailed:
+            // The face was fine, so this neither counts as a failed attempt nor retries automatically.
+            statusMessage = "Recognized, but the password couldn't be entered."
+            if showsUI {
+                NotchOverlayController.shared.finish(success: false)
+            }
         case .noResolution:
             statusMessage = "No face detected."
             if showsUI {
@@ -344,12 +357,39 @@ final class FaceUnlockCoordinator {
         }
     }
 
+    /// Watches whether macOS accepted the typed password. The success animation has already played by now.
+    private func confirmPasswordEntry() {
+        let monitor = lockMonitor
+        passwordConfirmationTask = Task { [weak self] in
+            let confirmation = await UnlockConfirmer.wait(
+                isLocked: { LockMonitor.isScreenActuallyLocked() },
+                isSleeping: { monitor.isSleeping },
+                sleep: { try? await Task.sleep(for: .seconds($0)) }
+            )
+            guard let self else { return }
+            self.passwordConfirmationTask = nil
+            let store = PasswordHealthStore.shared
+            switch confirmation {
+            case .unlocked:
+                store.health.recordEntryConfirmed(at: Date())
+            case .stillLocked:
+                store.health.recordEntryStillLocked()
+                if let reason = self.scanBlockedReason {
+                    self.statusMessage = reason
+                }
+            case .inconclusive:
+                break
+            }
+        }
+    }
+
     private enum ScanOutcome {
         case matched
         case consistentlyWrongFace
         /// A deny cue (glare, device rectangle) fired — actively rejected as a spoof regardless of match. Same failure path as `.consistentlyWrongFace`.
         case spoofSuspected
         case noResolution
+        case passwordEntryFailed
     }
 
     /// `UnlockGate` decides when recognition and liveness agree about one continuous presentation of the owner's face;
@@ -420,8 +460,15 @@ final class FaceUnlockCoordinator {
                 if let matched {
                     lastOutcome = "Matched \(matched.identity.name) at \(String(format: "%.3f", matched.centroidSimilarity)), \(livenessNote)."
                 }
-                await pocController.injectStoredPassword(requireAuthoritativeLock: true)
-                return .matched
+                switch await pocController.injectStoredPassword(requireAuthoritativeLock: true) {
+                case .typed:
+                    confirmPasswordEntry()
+                    return .matched
+                case .notNeeded:
+                    return .matched
+                case .failed:
+                    return .passwordEntryFailed
+                }
             case .keepScanning:
                 break
             }

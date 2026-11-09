@@ -76,6 +76,7 @@ Open the `.dmg` file and drag Glance to `/Applications`, then open it.
 | **Notch UI** | A closed pill that expands into a scan animation with success and failure states. Hover to retry — or turn animations off entirely and Glance stays invisible. |
 | **Camera & display** | Choose which camera to use, including different cameras for the built-in display vs. an external monitor. |
 | **Auto-locking sessions** | The Touch ID session re-locks itself a set time after you authenticate, from 24 hours to 30 days, however often it's used. |
+| **Password health** | Checks your stored password with macOS and pauses face unlock if it stops working, so an old password isn't typed repeatedly. |
 | **Trackpad haptics** | Hovering over the notch will trigger haptics |
 | **Notchless Mac support** | Macs without a notch will be replaced with a pill-shape, dynamic island style design. |
 | **Your data, your call** | Edit or delete your enrolment or stored password at any time. The encrypted files are removed immediately. |
