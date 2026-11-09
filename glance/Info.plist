@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>glance can require a Bluetooth device you choose to be connected before unlocking.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>macOS only shares your Wi-Fi network name with apps that have Location access. glance uses it on-device to check for trusted networks.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>macOS only shares your Wi-Fi network name with apps that have Location access. glance uses it on-device to check for trusted networks.</string>
 	<key>SUFeedURL</key>
 	<string>https://tryglance.app/appcast.xml</string>
 	<key>SUPublicEDKey</key>

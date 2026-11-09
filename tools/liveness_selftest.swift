@@ -532,7 +532,7 @@ struct LivenessSelfTest {
 
         // Clean skin: Light auto-confirms, Heavy stays pending (nothing has
         // proven the face is real, but nothing has failed it either).
-        let cleanFrames = (0..<8).map { makeCueFrame(at: Double($0) * 0.05, glare: skinGlare) }
+        let cleanFrames = (0..<LivenessTuning.default.lightModeMinimumFrames).map { makeCueFrame(at: Double($0) * 0.05, glare: skinGlare) }
         let cleanLight = evaluate(cleanFrames, mode: .light)
         guard case .confirmed(nil) = cleanLight.decision else {
             fatalError("FAIL: Light mode should auto-confirm a clean face, got \(cleanLight.decision).")

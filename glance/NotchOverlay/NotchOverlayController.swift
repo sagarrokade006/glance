@@ -39,11 +39,15 @@ final class NotchOverlayController {
     /// Kept as one enum (rather than two independent optionals) so exactly one is ever active.
     enum Content: Equatable {
         case scan(ScanMedia)
+        case notice(NotchNotice)
+        case challenge(HeadTurnPrompt)
         case onboarding(OnboardingController)
 
         static func == (lhs: Content, rhs: Content) -> Bool {
             switch (lhs, rhs) {
             case (.scan(let a), .scan(let b)): return a == b
+            case (.notice(let a), .notice(let b)): return a == b
+            case (.challenge(let a), .challenge(let b)): return a == b
             case (.onboarding(let a), .onboarding(let b)): return a === b
             default: return false
             }
@@ -90,7 +94,7 @@ final class NotchOverlayController {
     /// Reads the same setting as `FaceUnlockCoordinator.scanWindowDuration` so
     /// the two separate timers expire together.
     private var scanTimeoutDuration: Duration {
-        .seconds(GlanceSettings.shared.faceDetectionSeconds)
+        .seconds(GlanceSettings.shared.scanSeconds)
     }
     /// Long enough for the closing spring to fully settle before the window is
     /// hidden/left closed — collapsing state too early made the window visibly pop away.
@@ -290,6 +294,28 @@ final class NotchOverlayController {
             guard let self else { return }
             try? await Task.sleep(for: hold)
             guard !Task.isCancelled else { return }
+            await self.collapse()
+        }
+    }
+
+    /// Replaces the scan animation with the head-turn prompt for the rest of this scan.
+    func showChallenge(_ prompt: HeadTurnPrompt) {
+        guard phase == .scanning else { return }
+        content = .challenge(prompt)
+    }
+
+    /// Explains why face unlock can't run, then collapses. Uses the failure phase, so hovering simply shows it again.
+    func showNotice(_ notice: NotchNotice) {
+        guard isArmed else { return }
+        resolveTask?.cancel()
+        scanTimeoutTask?.cancel()
+        geometry = windowController.currentGeometry
+        content = .notice(notice)
+        phase = .failure
+        updateInteractivity()
+        resolveTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, !Task.isCancelled else { return }
             await self.collapse()
         }
     }

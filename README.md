@@ -72,10 +72,15 @@ Open the `.dmg` file and drag Glance to `/Applications`, then open it.
 |---|---|
 | **Face unlock** | Triggers on wake, on lock, or on pressing space at the lock screen. Pick any combination. |
 | **Multiple identities** | Enroll several people, or several versions of yourself — with glasses, a beard, different lighting. Toggle any of them off without deleting. |
-| **Liveness checks** | Watches for the motion and reflections that separate a real face from a photo. *Light* or *Heavy* strictness, or off. |
+| **Liveness checks** | Watches for the motion and reflections that separate a real face from a photo. *Light*, *Heavy*, or a random head-turn *Challenge*, or off. |
 | **Notch UI** | A closed pill that expands into a scan animation with success and failure states. Hover to retry — or turn animations off entirely and Glance stays invisible. |
 | **Camera & display** | Choose which camera to use, including different cameras for the built-in display vs. an external monitor. |
-| **Auto-locking sessions** | The Touch ID session re-locks itself after an idle period you choose, so an unattended Mac doesn't stay authorized forever. |
+| **Auto-locking sessions** | The Touch ID session re-locks itself a set time after you authenticate, from 24 hours to 30 days, however often it's used. |
+| **Activity history** | An encrypted, on-device log of unlocks, failed attempts, and spoof alerts. No images are stored. |
+| **Unlock conditions** | Optionally limit face unlock to trusted Wi-Fi networks, a connected Bluetooth device, or set hours. |
+| **Security levels** | Convenient, Balanced, and Strict presets for liveness, attention, and session length. |
+| **Attention check** | Only unlocks while your eyes are open and you're facing the screen. |
+| **Password health** | Checks your stored password with macOS and pauses face unlock if it stops working, so an old password isn't typed repeatedly. |
 | **Trackpad haptics** | Hovering over the notch will trigger haptics |
 | **Notchless Mac support** | Macs without a notch will be replaced with a pill-shape, dynamic island style design. |
 | **Your data, your call** | Edit or delete your enrolment or stored password at any time. The encrypted files are removed immediately. |
@@ -104,9 +109,10 @@ Glance won't type your password simply because a face matches. An unlock require
 
 1. A valid Glance session is authorized.
 2. The Mac is actually at the lock screen.
-3. An enabled identity matches above the configured similarity threshold.
-4. Liveness checks accept the detected face.
+3. An enabled identity matches above the configured similarity threshold on consecutive frames.
+4. Liveness checks accept that same face, not one seen earlier in the scan.
 5. Accessibility permission is available to enter the password.
+6. Fewer than five face attempts have failed since the Mac was last unlocked.
 
 Face recognition and liveness detection run independently and must both succeed before the password is entered. 
 

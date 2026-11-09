@@ -1071,6 +1071,15 @@ final class OnboardingController {
         isSavingPassword = true
         defer { isSavingPassword = false }
 
+        // Before Touch ID, so a typo fails straight away. If macOS can't answer, the password is saved unverified.
+        let verification = await Task.detached(priority: .userInitiated) {
+            PasswordVerifier.verify(trimmed)
+        }.value
+        guard verification != .rejected else {
+            passwordError = "That isn't your Mac password. Check it and try again."
+            return false
+        }
+
         do {
             try await Task.detached(priority: .userInitiated) {
                 try SecureCredentialManager.unlockSession(reason: "Set up Glance")
@@ -1098,6 +1107,7 @@ final class OnboardingController {
                 defer { bytes.resetBytes(in: 0..<bytes.count) }
                 try SecureCredentialManager.savePassword(bytes)
             }.value
+            PasswordHealthStore.shared.health.recordPasswordSaved(verification, at: Date())
             passwordError = nil
             navDirection = .forward
             withAnimation(OnboardingMetrics.stepAnimation) { step = .complete }

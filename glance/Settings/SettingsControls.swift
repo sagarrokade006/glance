@@ -780,7 +780,7 @@ struct LivenessModePicker: View {
     var body: some View {
         SettingsLabeledOptionRow(
             title: "Strength",
-            subtitle: "Light includes basic protection. Heavy requires you to blink or slightly move your head."
+            subtitle: "Light includes basic protection. Heavy requires you to blink or slightly move your head. Challenge also asks you to turn your head."
         ) {
             ForEach(LivenessMode.allCases) { mode in
                 SettingsOptionTile(
@@ -806,6 +806,7 @@ struct LivenessModePicker: View {
         switch mode {
         case .light: return "sun.min.fill"
         case .heavy: return "sun.max.fill"
+        case .challenge: return "arrow.left.and.right"
         }
     }
 }

@@ -39,7 +39,8 @@ enum KeystrokeInjector {
 
     /// Types the UTF-8 bytes into whatever has keyboard focus, then presses Return. Takes `Data` rather than `String` so the
     /// caller can hold the plaintext as a zero-able buffer; the brief internal `String` decode is scoped to this call. Blocking.
-    nonisolated static func typeAndReturn(_ passwordBytes: Data) throws {
+    /// `isStillLocked` is re-checked before every step; if it turns false, entry stops and Return is never pressed.
+    nonisolated static func typeAndReturn(_ passwordBytes: Data, isStillLocked: () -> Bool) throws {
         guard isAccessibilityTrusted() else {
             throw KeystrokeError.accessibilityNotGranted
         }
@@ -47,9 +48,21 @@ enum KeystrokeInjector {
             throw KeystrokeError.eventCreationFailed
         }
         let source = CGEventSource(stateID: .hidSystemState)
-        try clearFocusedField(source: source)
-        try postUnicodeText(text, source: source)
-        try postReturn(source: source)
+        let utf16 = Array(text.utf16)
+        let steps = InjectionPlan.steps(utf16: utf16, maxBatchLength: maximumUnicodeBatchLength)
+        try utf16.withUnsafeBufferPointer { buffer in
+            try InjectionPlan.run(steps, isStillLocked: isStillLocked) { step in
+                switch step {
+                case .clearField:
+                    try clearFocusedField(source: source)
+                case .text(let range):
+                    guard let base = buffer.baseAddress else { return }
+                    try postUnicode(base.advanced(by: range.lowerBound), length: range.count, source: source)
+                case .pressReturn:
+                    try postReturn(source: source)
+                }
+            }
+        }
     }
 
     /// Wipes anything already typed into the focused field (e.g. a stray keypress
@@ -102,31 +115,6 @@ enum KeystrokeInjector {
     /// one pair per batch.
     nonisolated private static let maximumUnicodeBatchLength = 20
     nonisolated private static let unicodeEventInterval: TimeInterval = 0.004
-
-    /// Posts the password in small UTF-16 batches. Splitting occurs only between
-    /// surrogate pairs, so non-BMP password characters are never corrupted.
-    private nonisolated static func postUnicodeText(_ text: String, source: CGEventSource?) throws {
-        let utf16 = Array(text.utf16)
-        try utf16.withUnsafeBufferPointer { buffer in
-            guard let base = buffer.baseAddress else { return }
-            var start = 0
-
-            while start < buffer.count {
-                var end = min(start + maximumUnicodeBatchLength, buffer.count)
-                // Do not split a high/low-surrogate pair across separate key events.
-                if end < buffer.count,
-                   (0xD800...0xDBFF).contains(buffer[end - 1]) {
-                    end -= 1
-                }
-                try postUnicode(
-                    base.advanced(by: start),
-                    length: end - start,
-                    source: source
-                )
-                start = end
-            }
-        }
-    }
 
     /// Unicode injection bypasses keyboard-layout issues. The password is placed
     /// on a key-down event as a text batch; the matching key-up maintains normal

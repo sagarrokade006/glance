@@ -73,6 +73,8 @@ enum LivenessMode: String, CaseIterable, Identifiable, Sendable {
     /// Deny cues plus at least one confirm cue must fire. Can block a user who holds
     /// perfectly still and never blinks for the whole scan.
     case heavy
+    /// Everything Heavy requires, plus turning toward a randomly chosen side.
+    case challenge
 
     var id: String { rawValue }
 
@@ -80,6 +82,7 @@ enum LivenessMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .light: return "Light"
         case .heavy: return "Heavy"
+        case .challenge: return "Challenge"
         }
     }
 
@@ -87,6 +90,7 @@ enum LivenessMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .light: return "Only rejects obvious spoofs."
         case .heavy: return "Also requires proof of a real face."
+        case .challenge: return "Also asks you to turn your head to a random side."
         }
     }
 }
@@ -117,9 +121,10 @@ struct LivenessTuning: Equatable {
     /// not a ramping level, so one firing frame is the event itself.
     var blinkFrames: Int = 1
 
-    /// Frames Light mode waits before auto-confirming, so deny cues get a fair chance to
-    /// fire first — otherwise a first-frame match could unlock before glare/device ever ran.
-    var lightModeMinimumFrames: Int = 3
+    /// Frames Light mode waits before auto-confirming, so deny cues get a fair chance to fire first.
+    /// Must be well above `glossFrames`/`deviceFrames`: at equal values a deny cue that misses a
+    /// single frame loses the race to auto-confirmation. Roughly 0.75s at ~20fps.
+    var lightModeMinimumFrames: Int = 15
 
     nonisolated static let `default` = LivenessTuning()
 
@@ -224,15 +229,30 @@ struct LivenessEvaluator {
         framesObserved = 0
     }
 
-    /// Firing is latched: a cue that has fired stays fired for the rest of the scan.
-    mutating func observe(_ readings: [LivenessCue: CueReading]) -> LivenessSnapshot {
-        framesObserved += 1
+    /// Discards positive evidence of life but keeps deny-cue counts, so changing faces can't wait out a spoof tell.
+    mutating func resetConfirmation() {
+        framesObserved = 0
+        for cue in LivenessCue.allCases where cue.role == .confirm {
+            states[cue] = nil
+        }
+    }
+
+    /// Firing is latched: a cue that has fired stays fired for the rest of the scan, or until
+    /// `resetConfirmation()`. With `countsTowardConfirmation` false, only deny cues accumulate.
+    mutating func observe(
+        _ readings: [LivenessCue: CueReading],
+        countsTowardConfirmation: Bool = true
+    ) -> LivenessSnapshot {
+        if countsTowardConfirmation {
+            framesObserved += 1
+        }
 
         for cue in LivenessCue.allCases {
             var state = states[cue] ?? LivenessCueState()
             let reading = readings[cue] ?? .none
             state.reading = reading
-            if reading.confidence > 0, reading.level >= tuning.level(for: cue) {
+            let mayCount = countsTowardConfirmation || cue.role == .deny
+            if mayCount, reading.confidence > 0, reading.level >= tuning.level(for: cue) {
                 state.framesCounted += 1
                 if state.framesCounted >= tuning.frames(for: cue) {
                     state.hasFired = true

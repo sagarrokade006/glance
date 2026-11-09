@@ -21,6 +21,7 @@ struct CameraFrame {
     let image: CGImage
     let source: CIImage
     let sourceSize: CGSize
+    let capturedAt: Date
 }
 
 @Observable
@@ -65,6 +66,9 @@ final class CameraManager: NSObject {
         }
 
         errorMessage = nil
+        // A publish task queued before the last `stop()` can run after it, so `stop()` alone can't guarantee this is empty.
+        currentFrame = nil
+        acceptFramesCapturedAfter = Date()
         configureSessionIfNeeded()
         reconcileDeviceIfNeeded()
 
@@ -96,6 +100,7 @@ final class CameraManager: NSObject {
         }
     }
 
+    private var acceptFramesCapturedAfter = Date.distantPast
     private var isConfigured = false
     private var currentInput: AVCaptureDeviceInput?
 
@@ -160,6 +165,8 @@ final class CameraManager: NSObject {
     }
 
     fileprivate func publish(frame: CameraFrame) {
+        // Drops frames still in flight from an earlier run, which would otherwise be scored by the next scan.
+        guard isRunning, frame.capturedAt >= acceptFramesCapturedAfter else { return }
         currentFrame = frame
     }
 
@@ -231,7 +238,8 @@ final class CameraManager: NSObject {
                 id: nextFrameID,
                 image: cgImage,
                 source: sourceImage,
-                sourceSize: sourceExtent.size
+                sourceSize: sourceExtent.size,
+                capturedAt: Date()
             )
 
             Task { @MainActor [weak owner] in

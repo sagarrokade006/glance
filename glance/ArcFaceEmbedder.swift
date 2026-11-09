@@ -35,6 +35,7 @@ enum ArcFaceEmbedderError: LocalizedError {
 nonisolated final class ArcFaceEmbedder: FaceEmbedder, @unchecked Sendable {
     nonisolated let name = "ArcFace (w600k_mbf)"
     nonisolated let modelIdentifier = "arcface-w600k_mbf-v1"
+    nonisolated let isSuitableForUnlock = true
     nonisolated let embeddingDimension = 512
     nonisolated let requiresAlignment = true
 

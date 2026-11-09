@@ -33,12 +33,14 @@ final class FaceUnlockCoordinator {
     }
     /// Shares its setting with NotchOverlayController's scanning timeout, so the background loop stops in step with the UI collapsing.
     private var scanWindowDuration: TimeInterval {
-        TimeInterval(GlanceSettings.shared.faceDetectionSeconds)
+        TimeInterval(GlanceSettings.shared.scanSeconds)
     }
-    /// A wake often catches the owner while they are still looking away from
-    /// the camera. Require a sustained non-match rather than a few early
-    /// frames before giving the failure animation.
-    private let wrongFaceGraceDuration: Duration = .seconds(2)
+    /// Failed scans at the current lock screen. Cleared only by a confirmed real unlock, so waking the display can't reset it.
+    private var attemptLimiter = UnlockAttemptLimiter()
+    private var handledUnlockEventCount = 0
+    /// Not `scanTask`: unlocking disarms and cancels the scan, and this must still see the result. Also blocks a second
+    /// scan from typing again while macOS is still deciding about the first.
+    private var passwordConfirmationTask: Task<Void, Never>?
 
     private(set) var statusMessage = "Idle"
     private(set) var lastOutcome: String?
@@ -94,6 +96,11 @@ final class FaceUnlockCoordinator {
         guard LockMonitor.isScreenActuallyLocked() else {
             hasArmedForCurrentLock = false
             hasAutoRetriedForCurrentLock = false
+            // Requires the notification as well: CGSession alone can briefly misreport right after wake.
+            if lockMonitor.unlockEventCount != handledUnlockEventCount {
+                handledUnlockEventCount = lockMonitor.unlockEventCount
+                attemptLimiter.reset()
+            }
             disarmOverlay()
             return
         }
@@ -135,6 +142,64 @@ final class FaceUnlockCoordinator {
             // arm() only shows a small closed notch silhouette, so this only needs a brief buffer past the login window's entrance.
             try? await Task.sleep(nanoseconds: 250_000_000)
             await self?.arm(autoScan: shouldAutoScan)
+        }
+    }
+
+    /// Why no scan may start right now, if anything. Checked by every path that can start one.
+    private var scanBlockedNotice: NotchNotice? {
+        if pipeline.usingFallbackEmbedder {
+            return NotchNotice(
+                symbol: "exclamationmark.triangle.fill",
+                title: "Face unlock unavailable",
+                detail: "The recognition model couldn't be loaded."
+            )
+        }
+        if PasswordHealthStore.shared.health.isStale {
+            return NotchNotice(
+                symbol: "key.fill",
+                title: "Face unlock paused",
+                detail: "Your stored password looks out of date."
+            )
+        }
+        if attemptLimiter.isLockedOut {
+            return NotchNotice(
+                symbol: "lock.fill",
+                title: "Face unlock paused",
+                detail: "Too many failed attempts. Enter your password."
+            )
+        }
+        if let unmet = unmetUnlockCondition {
+            return NotchNotice(symbol: "shield.slash.fill", title: "Enter your password", detail: unmet.detail)
+        }
+        return nil
+    }
+
+    private func recordFailedAttempt(_ kind: ActivityKind, detail: String?) {
+        attemptLimiter.recordFailure()
+        ActivityStore.shared.record(kind, detail: detail)
+        if attemptLimiter.isLockedOut {
+            ActivityStore.shared.record(.paused, detail: "\(attemptLimiter.maxFailures) failed attempts.")
+        }
+    }
+
+    /// System lookups only run for conditions the user has turned on.
+    private var unmetUnlockCondition: UnmetUnlockCondition? {
+        let conditions = GlanceSettings.shared.unlockConditions
+        let environment = TrustedEnvironment.shared
+        return conditions.firstUnmet(
+            now: Date(),
+            calendar: .current,
+            networkName: conditions.requiresTrustedNetwork ? environment.currentNetworkName() : nil,
+            isBluetoothConnected: conditions.requiresBluetoothDevice
+                && conditions.bluetoothAddress.map(environment.isBluetoothDeviceConnected(address:)) == true
+        )
+    }
+
+    /// Records why no scan can run and, unless animations are off, explains it in the notch.
+    private func presentBlockedNotice(_ notice: NotchNotice) {
+        statusMessage = notice.statusText
+        if showsUI {
+            NotchOverlayController.shared.showNotice(notice)
         }
     }
 
@@ -223,6 +288,12 @@ final class FaceUnlockCoordinator {
 
     /// Called on arm, and again whenever the overlay hover-activates.
     private func startScanCycle() {
+        guard passwordConfirmationTask == nil else { return }
+        // Every path that can start a scan comes through here.
+        if let notice = scanBlockedNotice {
+            presentBlockedNotice(notice)
+            return
+        }
         scanTask?.cancel()
         scanGeneration &+= 1
         let generation = scanGeneration
@@ -270,6 +341,7 @@ final class FaceUnlockCoordinator {
                 NotchOverlayController.shared.finish(success: true)
             }
         case .consistentlyWrongFace:
+            recordFailedAttempt(.notRecognized, detail: nil)
             statusMessage = "Face not recognized."
             if showsUI {
                 NotchOverlayController.shared.finish(success: false)
@@ -279,6 +351,7 @@ final class FaceUnlockCoordinator {
                 scheduleAutoRetryIfEnabled(after: headlessRetryDelay)
             }
         case .spoofSuspected:
+            recordFailedAttempt(.spoofSuspected, detail: lastOutcome)
             statusMessage = "Couldn't confirm a live face."
             if showsUI {
                 NotchOverlayController.shared.finish(success: false)
@@ -286,6 +359,13 @@ final class FaceUnlockCoordinator {
                 scheduleAutoRetryIfEnabled(after: NotchOverlayController.shared.failureHoldDuration)
             } else {
                 scheduleAutoRetryIfEnabled(after: headlessRetryDelay)
+            }
+        case .passwordEntryFailed:
+            // The face was fine, so this neither counts as a failed attempt nor retries automatically.
+            statusMessage = "Recognized, but the password couldn't be entered."
+            ActivityStore.shared.record(.passwordEntryFailed)
+            if showsUI {
+                NotchOverlayController.shared.finish(success: false)
             }
         case .noResolution:
             statusMessage = "No face detected."
@@ -301,6 +381,17 @@ final class FaceUnlockCoordinator {
 
     /// `delay` waits out whatever the overlay is still showing so the retry doesn't start underneath the previous outcome.
     private func scheduleAutoRetryIfEnabled(after delay: Duration) {
+        // Reaching the limit explains itself as soon as the failure animation finishes, retry setting or not.
+        if attemptLimiter.isLockedOut {
+            autoRetryTask?.cancel()
+            autoRetryTask = Task { [weak self] in
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled, let self, LockMonitor.isScreenActuallyLocked(),
+                      let notice = self.scanBlockedNotice else { return }
+                self.presentBlockedNotice(notice)
+            }
+            return
+        }
         guard GlanceSettings.shared.autoRetryOnce, !hasAutoRetriedForCurrentLock else { return }
         hasAutoRetriedForCurrentLock = true
         autoRetryTask?.cancel()
@@ -316,15 +407,54 @@ final class FaceUnlockCoordinator {
         }
     }
 
+    private func showChallengePrompt(for gate: UnlockGate) {
+        guard let challenge = gate.challenge else { return }
+        NotchOverlayController.shared.showChallenge(
+            HeadTurnPrompt(direction: challenge.direction, progress: challenge.progress)
+        )
+    }
+
+    /// Watches whether macOS accepted the typed password. The success animation has already played by now.
+    private func confirmPasswordEntry(detail: String?) {
+        let monitor = lockMonitor
+        passwordConfirmationTask = Task { [weak self] in
+            let confirmation = await UnlockConfirmer.wait(
+                isLocked: { LockMonitor.isScreenActuallyLocked() },
+                isSleeping: { monitor.isSleeping },
+                sleep: { try? await Task.sleep(for: .seconds($0)) }
+            )
+            guard let self else { return }
+            self.passwordConfirmationTask = nil
+            let store = PasswordHealthStore.shared
+            switch confirmation {
+            case .unlocked:
+                store.health.recordEntryConfirmed(at: Date())
+                ActivityStore.shared.record(.unlocked, detail: detail)
+            case .stillLocked:
+                store.health.recordEntryStillLocked()
+                ActivityStore.shared.record(.passwordRejected, detail: "The Mac stayed locked after typing the password.")
+                if store.health.isStale {
+                    ActivityStore.shared.record(.paused, detail: "Stored password looks out of date.")
+                }
+                if let notice = self.scanBlockedNotice {
+                    self.presentBlockedNotice(notice)
+                }
+            case .inconclusive:
+                break
+            }
+        }
+    }
+
     private enum ScanOutcome {
         case matched
         case consistentlyWrongFace
         /// A deny cue (glare, device rectangle) fired — actively rejected as a spoof regardless of match. Same failure path as `.consistentlyWrongFace`.
         case spoofSuspected
         case noResolution
+        case passwordEntryFailed
     }
 
-    /// Recognition and liveness run concurrently and each latches when it succeeds, so unlock fires the moment the second lands;
+    /// `UnlockGate` decides when recognition and liveness agree about one continuous presentation of the owner's face;
     /// liveness never fails the scan by staying undecided, it just keeps scanning until `deadline`.
     /// `requireOverlayScanning` bails early once the overlay's own timeout collapses the UI — only applied when there is an
     /// overlay, since headlessly `phase` never becomes `.scanning` at all.
@@ -332,14 +462,14 @@ final class FaceUnlockCoordinator {
         let livenessEnabled = GlanceSettings.shared.livenessChecksEnabled
         let liveness = LivenessAnalyzer()
         liveness.modeProvider = { GlanceSettings.shared.livenessMode }
-        /// Set by the first consecutive non-match. A gap in face detection or
-        /// a valid match clears it, so only a sustained wrong face resolves the scan.
-        var wrongFaceStartedAt: ContinuousClock.Instant?
-
-        /// Cleared the moment a detected face fails to match, so a latched match can't be handed to whoever steps in next.
-        var readyMatch: ScoredIdentity?
-        /// Turning liveness off in Settings makes this half permanently ready.
-        var livenessConfirmed = !livenessEnabled
+        var policy = UnlockGatePolicy.standard
+        policy.requiresAttention = GlanceSettings.shared.requiresAttention
+        // Without an overlay there's nowhere to show the prompt, so a headless scan falls back to Heavy's checks.
+        let challenge = livenessEnabled && GlanceSettings.shared.livenessMode == .challenge && requireOverlayScanning
+            ? HeadTurnChallenge(direction: HeadTurnDirection.allCases.randomElement() ?? .left)
+            : nil
+        let gate = UnlockGate(policy: policy, liveness: livenessEnabled ? liveness : nil, challenge: challenge)
+        showChallengePrompt(for: gate)
         /// Last frame's selected face, passed back so `selectDominantFace` stays on the same person instead of flip-flopping.
         var lastFaceBoundingBox: CGRect?
         /// Cheap way to detect "no new camera frame yet" vs. "fresh frame" — without it a repeat frame would corrupt the liveness motion signal.
@@ -356,6 +486,8 @@ final class FaceUnlockCoordinator {
             }
             lastProcessedFrameID = frame.id
 
+            guard gate.policy.isFresh(capturedAt: frame.capturedAt, now: Date()) else { continue }
+
             let pipeline = self.pipeline
             let previousBoundingBox = lastFaceBoundingBox
             let outcome = await Task.detached(priority: .userInitiated) { () -> (FaceRecognitionResult, LivenessFrame)? in
@@ -365,55 +497,51 @@ final class FaceUnlockCoordinator {
             }.value
 
             guard let (result, livenessFrame) = outcome else {
-                wrongFaceStartedAt = nil
+                gate.observeNoFace(at: Date())
                 lastFaceBoundingBox = nil
                 try? await Task.sleep(nanoseconds: 20_000_000)
                 continue
             }
             lastFaceBoundingBox = result.face.normalizedBoundingBox
 
-            // Fed regardless of match, so liveness stays a genuinely independent gate rather than one starved by recognition confidence.
-            var confirmingCue: LivenessCue?
-            if livenessEnabled {
-                let snapshot = liveness.observe(livenessFrame)
-                switch snapshot.decision {
-                case .denied:
-                    // Overrides everything, including a match and any confirmation that already happened.
-                    lastOutcome = snapshot.decision.denialReason
-                    return .spoofSuspected
-                case .confirmed(let cue):
-                    livenessConfirmed = true
-                    confirmingCue = cue
-                case .pending:
-                    break
-                }
-            }
-
             // `activeIdentities`, not `identities`: someone switched off on the Your Face page stays enrolled but must not unlock.
             let scored = pipeline.score(result.embedding, against: FaceEnrollmentStore.shared.activeIdentities)
             let matched = pipeline.bestMatch(in: scored, threshold: matchThreshold)
+            // The closest single sample, not the centroid: a turned head can sit far from the average of all poses.
+            let bestSimilarity = scored
+                .filter { !$0.identity.isStale(comparedTo: pipeline.embedder) }
+                .map(\.maxSampleSimilarity)
+                .max()
+            let faceClass = gate.policy.classify(isMatch: matched != nil, bestSimilarity: bestSimilarity)
 
-            if let matched {
-                wrongFaceStartedAt = nil
-                readyMatch = matched
-            } else {
-                readyMatch = nil
-                if wrongFaceStartedAt == nil {
-                    wrongFaceStartedAt = .now
-                }
-                if ContinuousClock.now - wrongFaceStartedAt! >= wrongFaceGraceDuration {
-                    return .consistentlyWrongFace
-                }
-            }
-
-            if let readyMatch, livenessConfirmed {
+            let decision = gate.observeFace(faceClass, frame: livenessFrame, at: Date())
+            showChallengePrompt(for: gate)
+            switch decision {
+            case .spoof(let reason):
+                // Overrides everything, including a match and any confirmation that already happened.
+                lastOutcome = reason
+                return .spoofSuspected
+            case .wrongFace:
+                return .consistentlyWrongFace
+            case .unlock(let confirmingCue):
                 statusMessage = "Recognized — unlocking…"
                 let livenessNote = livenessEnabled
                     ? (confirmingCue.map { "live via \($0.title)" } ?? "liveness clear")
                     : "liveness off"
-                lastOutcome = "Matched \(readyMatch.identity.name) at \(String(format: "%.3f", readyMatch.centroidSimilarity)), \(livenessNote)."
-                await pocController.injectStoredPassword(requireAuthoritativeLock: true)
-                return .matched
+                if let matched {
+                    lastOutcome = "Matched \(matched.identity.name) at \(String(format: "%.3f", matched.centroidSimilarity)), \(livenessNote)."
+                }
+                switch await pocController.injectStoredPassword(requireAuthoritativeLock: true) {
+                case .typed:
+                    confirmPasswordEntry(detail: matched.map { "\($0.identity.name), \(livenessNote)" })
+                    return .matched
+                case .notNeeded:
+                    return .matched
+                case .failed:
+                    return .passwordEntryFailed
+                }
+            case .keepScanning:
+                break
             }
 
             try? await Task.sleep(nanoseconds: 20_000_000)

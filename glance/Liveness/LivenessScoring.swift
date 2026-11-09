@@ -20,6 +20,7 @@ struct LivenessFrame {
     /// Distance between the two eye centers — the normalization scale for every ratio below.
     let interocularDistance: CGFloat?
     let yaw: Float?
+    let pitch: Float?
     let leftEyeAspectRatio: CGFloat?
     let rightEyeAspectRatio: CGFloat?
     /// `(noseCentroid.x - eyeMidpoint.x) / interocularDistance` — tracks `tan(yaw)` on a real
@@ -47,8 +48,10 @@ struct LivenessFrame {
         noseOffsetRatio: CGFloat?,
         hasReliableLandmarks: Bool,
         deviceOverlapFraction: CGFloat?,
-        glare: GlareSample? = nil
+        glare: GlareSample? = nil,
+        pitch: Float? = nil
     ) {
+        self.pitch = pitch
         self.timestamp = timestamp
         self.landmarks = landmarks
         self.interocularDistance = interocularDistance

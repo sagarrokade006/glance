@@ -9,8 +9,10 @@
 import Foundation
 import Observation
 
-/// How long the Touch-ID-unlocked session may sit idle before it re-locks.
+/// How long after Touch ID the session re-locks, regardless of how often it is used.
 enum AutoLockInterval: Int, CaseIterable, Identifiable {
+    case oneDay = 1
+    case twoDays = 2
     case sevenDays = 7
     case fourteenDays = 14
     case thirtyDays = 30
@@ -21,6 +23,8 @@ enum AutoLockInterval: Int, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .never: return "Never"
+        case .oneDay: return "24 hours"
+        case .twoDays: return "48 hours"
         case .sevenDays: return "7 days"
         case .fourteenDays: return "14 days"
         case .thirtyDays: return "30 days"
@@ -33,7 +37,7 @@ enum AutoLockInterval: Int, CaseIterable, Identifiable {
         self == .never ? nil : TimeInterval(rawValue) * 24 * 60 * 60
     }
 
-    /// Position in `allCases`, used to drive the discrete 4-stop slider.
+    /// Position in `allCases`, used to drive the discrete stepped slider.
     var sliderIndex: Double {
         Double(Self.allCases.firstIndex(of: self) ?? 0)
     }
@@ -105,6 +109,8 @@ final class GlanceSettings {
         static let matchThreshold = "GlanceSettings.matchThreshold"
         static let livenessChecksEnabled = "GlanceSettings.livenessChecksEnabled"
         static let livenessMode = "GlanceSettings.livenessMode"
+        static let requiresAttention = "GlanceSettings.requiresAttention"
+        static let unlockConditions = "GlanceSettings.unlockConditions"
         static let minimumFaceWidth = "GlanceSettings.minimumFaceWidth"
         static let unlockAnimationStyle = "GlanceSettings.unlockAnimationStyle"
         static let showUnlockAnimation = "GlanceSettings.showUnlockAnimation"
@@ -147,6 +153,17 @@ final class GlanceSettings {
     /// see `LivenessMode`.
     var livenessMode: LivenessMode {
         didSet { defaults.set(livenessMode.rawValue, forKey: Key.livenessMode) }
+    }
+    var unlockConditions: UnlockConditions {
+        didSet {
+            if let data = try? JSONEncoder().encode(unlockConditions) {
+                defaults.set(data, forKey: Key.unlockConditions)
+            }
+        }
+    }
+    /// Requires open eyes and a face turned toward the screen, so being in frame isn't enough to unlock.
+    var requiresAttention: Bool {
+        didSet { defaults.set(requiresAttention, forKey: Key.requiresAttention) }
     }
     /// Mirrored into `FaceRecognitionPipeline.minimumProminentFaceWidth` on
     /// every change, since that's read from a background `nonisolated` context.
@@ -231,6 +248,15 @@ final class GlanceSettings {
 
     static let faceDetectionRange = 3...10
 
+    /// The head-turn challenge needs time to read the prompt and turn, so it never runs shorter than this.
+    private static let minimumChallengeSeconds = 8
+
+    /// How long a scan actually runs. Read by both the scan loop and the overlay so they stop together.
+    var scanSeconds: Int {
+        let usesChallenge = livenessChecksEnabled && livenessMode == .challenge && showUnlockAnimation
+        return usesChallenge ? max(faceDetectionSeconds, Self.minimumChallengeSeconds) : faceDetectionSeconds
+    }
+
     /// Which display Face Unlock shows on. `nil` means `NotchGeometry.preferredScreen()`'s
     /// default, re-evaluated live; a pinned display has deliberately no
     /// fallback if disconnected (see `FaceUnlockCoordinator.evaluateTrigger()`).
@@ -294,6 +320,10 @@ final class GlanceSettings {
         // catches the main attack (a photo on a phone screen).
         livenessMode = defaults.string(forKey: Key.livenessMode)
             .flatMap(LivenessMode.init(rawValue:)) ?? .light
+        requiresAttention = defaults.object(forKey: Key.requiresAttention) as? Bool ?? true
+        unlockConditions = defaults.data(forKey: Key.unlockConditions)
+            .flatMap { try? JSONDecoder().decode(UnlockConditions.self, from: $0) }
+            ?? UnlockConditions()
         // Matches `DetectionDistanceLevel.standard` — see RecognitionSettingsPage.swift.
         minimumFaceWidth = defaults.object(forKey: Key.minimumFaceWidth) as? Float ?? 0.21
 
@@ -315,8 +345,9 @@ final class GlanceSettings {
         showUnlockAnimation = defaults.object(forKey: Key.showUnlockAnimation) as? Bool
             ?? (storedStyle != .none)
 
-        // On wake/lock by default, not on space — `.onSpace` needs Input
-        // Monitoring, which a fresh install shouldn't request unprompted.
+        // On wake only by default. `.onLock` would scan the moment you lock, and can unlock
+        // again behind you as you walk away. `.onSpace` needs Input Monitoring, which a
+        // fresh install shouldn't request unprompted.
         let storedTriggers = (defaults.array(forKey: Key.unlockTriggers) as? [String])?
             .compactMap { raw -> UnlockTrigger? in
                 // "onActivity" was merged into "onWake"; keep old installs working.
@@ -324,7 +355,7 @@ final class GlanceSettings {
                 return UnlockTrigger(rawValue: raw)
             }
         unlockTriggers = storedTriggers.map(Set.init).flatMap { $0.isEmpty ? nil : $0 }
-            ?? [.onWake, .onLock]
+            ?? [.onWake]
         retryOnHover = defaults.object(forKey: Key.retryOnHover) as? Bool ?? true
         faceDetectionSeconds = (defaults.object(forKey: Key.faceDetectionSeconds) as? Int)
             .map { min(max($0, Self.faceDetectionRange.lowerBound), Self.faceDetectionRange.upperBound) }

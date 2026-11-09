@@ -80,11 +80,23 @@ struct NotchOverlayView: View {
     /// Onboarding always uses the full panel, and `.none` keeps the full expansion too
     /// (it only drops the video) — so this is specifically `.minimal` scan content.
     private var isMinimalScan: Bool {
-        onboardingController == nil && controller.activeUnlockStyle == .minimal
+        onboardingController == nil && !usesMessagePanel && controller.activeUnlockStyle == .minimal
+    }
+
+    private var usesMessagePanel: Bool { notice != nil || challengePrompt != nil }
+
+    private var challengePrompt: HeadTurnPrompt? {
+        if case .challenge(let prompt) = controller.content { return prompt }
+        return nil
+    }
+
+    private var notice: NotchNotice? {
+        if case .notice(let notice) = controller.content { return notice }
+        return nil
     }
 
     private var scanOpenSize: CGSize {
-        style == .notch ? NotchGeometry.notchOpenSize : NotchGeometry.pillOpenSize
+        style == .notch ? NotchGeometry.notchScanOpenSize(closedSize: closedBodySize) : NotchGeometry.pillOpenSize
     }
 
     /// In notch style the width grows to add flanking black beside the physical cutout;
@@ -106,6 +118,7 @@ struct NotchOverlayView: View {
 
     private var openBodySize: CGSize {
         if let onboardingController { return onboardingController.panelSize }
+        if usesMessagePanel { return NotchMessageView.panelSize(closedSize: style == .notch ? closedBodySize : nil) }
         return isMinimalScan ? minimalOpenBodySize : scanOpenSize
     }
 
@@ -121,6 +134,7 @@ struct NotchOverlayView: View {
                     ? NotchGeometry.minimalNotchTopRadius
                     : minimalOpenBodySize.height / 2
             }
+            if style == .pill, usesMessagePanel { return NotchGeometry.messagePanelCornerRadius }
             return style == .notch ? NotchGeometry.openTopRadius : NotchGeometry.pillOpenCornerRadius
         }
         // Half the height is exactly a capsule end, in pill style.
@@ -134,11 +148,12 @@ struct NotchOverlayView: View {
                     ? NotchGeometry.minimalNotchBottomRadius
                     : minimalOpenBodySize.height / 2
             }
+            if usesMessagePanel { return NotchGeometry.messagePanelCornerRadius }
             guard style == .notch else {
                 // Uniform corners in pill style — no flare to balance, unlike the notch.
                 return NotchGeometry.pillOpenCornerRadius
             }
-            return onboardingController?.panelBottomRadius ?? NotchGeometry.openBottomRadius
+            return onboardingController?.panelBottomRadius ?? NotchGeometry.notchScanBottomRadius
         }
         return style == .notch ? NotchGeometry.closedBottomRadius : closedBodySize.height / 2
     }
@@ -173,7 +188,7 @@ struct NotchOverlayView: View {
     }
 
     private var scanContentPaddingTop: CGFloat {
-        style == .pill ? NotchGeometry.pillContentPaddingTop : NotchGeometry.notchContentPaddingTop
+        style == .pill ? NotchGeometry.pillContentPaddingTop : closedBodySize.height + NotchGeometry.notchContentPaddingTop
     }
 
     private var scanContentPaddingLeading: CGFloat {
@@ -255,6 +270,12 @@ struct NotchOverlayView: View {
                 if let onboardingController {
                     // Onboarding's step views fill `panelSize` themselves — no shared padding here.
                     OnboardingNotchView(controller: onboardingController)
+                } else if let challengePrompt {
+                    NotchChallengeView(prompt: challengePrompt)
+                        .padding(.top, style == .notch ? closedBodySize.height : 0)
+                } else if let notice {
+                    NotchMessageView(notice: notice)
+                        .padding(.top, style == .notch ? closedBodySize.height : 0)
                 } else {
                     scanContent
                 }
