@@ -171,6 +171,14 @@ final class FaceUnlockCoordinator {
         return nil
     }
 
+    private func recordFailedAttempt(_ kind: ActivityKind, detail: String?) {
+        attemptLimiter.recordFailure()
+        ActivityStore.shared.record(kind, detail: detail)
+        if attemptLimiter.isLockedOut {
+            ActivityStore.shared.record(.paused, detail: "\(attemptLimiter.maxFailures) failed attempts.")
+        }
+    }
+
     /// Records why no scan can run and, unless animations are off, explains it in the notch.
     private func presentBlockedNotice(_ notice: NotchNotice) {
         statusMessage = notice.statusText
@@ -317,7 +325,7 @@ final class FaceUnlockCoordinator {
                 NotchOverlayController.shared.finish(success: true)
             }
         case .consistentlyWrongFace:
-            attemptLimiter.recordFailure()
+            recordFailedAttempt(.notRecognized, detail: nil)
             statusMessage = "Face not recognized."
             if showsUI {
                 NotchOverlayController.shared.finish(success: false)
@@ -327,7 +335,7 @@ final class FaceUnlockCoordinator {
                 scheduleAutoRetryIfEnabled(after: headlessRetryDelay)
             }
         case .spoofSuspected:
-            attemptLimiter.recordFailure()
+            recordFailedAttempt(.spoofSuspected, detail: lastOutcome)
             statusMessage = "Couldn't confirm a live face."
             if showsUI {
                 NotchOverlayController.shared.finish(success: false)
@@ -339,6 +347,7 @@ final class FaceUnlockCoordinator {
         case .passwordEntryFailed:
             // The face was fine, so this neither counts as a failed attempt nor retries automatically.
             statusMessage = "Recognized, but the password couldn't be entered."
+            ActivityStore.shared.record(.passwordEntryFailed)
             if showsUI {
                 NotchOverlayController.shared.finish(success: false)
             }
@@ -383,7 +392,7 @@ final class FaceUnlockCoordinator {
     }
 
     /// Watches whether macOS accepted the typed password. The success animation has already played by now.
-    private func confirmPasswordEntry() {
+    private func confirmPasswordEntry(detail: String?) {
         let monitor = lockMonitor
         passwordConfirmationTask = Task { [weak self] in
             let confirmation = await UnlockConfirmer.wait(
@@ -397,8 +406,13 @@ final class FaceUnlockCoordinator {
             switch confirmation {
             case .unlocked:
                 store.health.recordEntryConfirmed(at: Date())
+                ActivityStore.shared.record(.unlocked, detail: detail)
             case .stillLocked:
                 store.health.recordEntryStillLocked()
+                ActivityStore.shared.record(.passwordRejected, detail: "The Mac stayed locked after typing the password.")
+                if store.health.isStale {
+                    ActivityStore.shared.record(.paused, detail: "Stored password looks out of date.")
+                }
                 if let notice = self.scanBlockedNotice {
                     self.presentBlockedNotice(notice)
                 }
@@ -489,7 +503,7 @@ final class FaceUnlockCoordinator {
                 }
                 switch await pocController.injectStoredPassword(requireAuthoritativeLock: true) {
                 case .typed:
-                    confirmPasswordEntry()
+                    confirmPasswordEntry(detail: matched.map { "\($0.identity.name), \(livenessNote)" })
                     return .matched
                 case .notNeeded:
                     return .matched

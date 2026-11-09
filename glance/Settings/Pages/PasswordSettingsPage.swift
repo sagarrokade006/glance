@@ -231,6 +231,7 @@ struct PasswordSettingsPage: View {
     private func removePassword() {
         do {
             FaceEnrollmentStore.shared.deleteAll()
+            ActivityStore.shared.clear()
             try SecureCredentialManager.deletePassword()
             pocController.refreshCredentialStatus()
             statusMessage = "Password and face enrollment removed."
