@@ -38,6 +38,8 @@ final class LockMonitor {
     /// Observers track `eventCount` (changes on every event, even repeats of the same kind) then read `lastEvent`.
     private(set) var lastEvent: LockEventKind?
     private(set) var eventCount: Int = 0
+    /// Counts unlock notifications. Spoofable alone, so pair it with `isScreenActuallyLocked()` before trusting it.
+    private(set) var unlockEventCount: Int = 0
 
     private var distributedObservers: [NSObjectProtocol] = []
     private var workspaceObservers: [NSObjectProtocol] = []
@@ -73,6 +75,7 @@ final class LockMonitor {
             queue: .main
         ) { [weak self] _ in
             self?.isScreenLocked = false
+            self?.unlockEventCount += 1
             self?.record(.screenUnlocked)
         })
         // Observing the key press that dismissed the screensaver isn't possible — Secure Event Input suppresses keyboard taps

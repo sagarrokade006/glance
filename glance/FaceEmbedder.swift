@@ -16,6 +16,8 @@ protocol FaceEmbedder: Sendable {
     /// Persisted alongside every sample; `SecureFaceStore` uses it to refuse comparing across different embedders
     /// (which wouldn't error, just produce confident nonsense).
     nonisolated var modelIdentifier: String { get }
+    /// Whether this embedder separates people well enough to enroll with or to unlock the Mac.
+    nonisolated var isSuitableForUnlock: Bool { get }
     /// Declared output length, for cross-model mismatch detection without running an embedding first.
     nonisolated var embeddingDimension: Int { get }
     /// Whether this embedder needs a canonically-aligned input (ArcFace) vs. tolerating a loose crop (Vision feature-print).
@@ -40,6 +42,7 @@ enum FaceEmbedderError: LocalizedError {
 struct VisionFeaturePrintEmbedder: FaceEmbedder {
     nonisolated let name = "Vision Feature Print"
     nonisolated let modelIdentifier = "vision-feature-print-v1"
+    nonisolated let isSuitableForUnlock = false
     // Nominal hint only — `modelIdentifier` is the real discriminator `SecureFaceStore` relies on.
     nonisolated let embeddingDimension = 2048
     nonisolated let requiresAlignment = false

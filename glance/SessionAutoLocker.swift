@@ -2,7 +2,7 @@
 //  SessionAutoLocker.swift
 //  glance
 //
-//  Enforces `GlanceSettings.autoLockInterval`: re-locks the session once idle past the user's chosen limit.
+//  Enforces `GlanceSettings.autoLockInterval`: re-locks the session once it is older than the user's chosen limit.
 //
 
 import Foundation
@@ -25,7 +25,7 @@ final class SessionAutoLocker {
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
 
-        // Also evaluate on wake: no timer fires during sleep, but the elapsed time still counts as idle once compared.
+        // Also evaluate on wake: no timer fires during sleep, but the elapsed time still counts once compared.
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
@@ -41,18 +41,10 @@ final class SessionAutoLocker {
         timer?.invalidate()
     }
 
-    /// Routed through `POCController.lockSession()` rather than `SecureCredentialManager` directly, so the Settings UI's
-    /// `isSessionUnlocked` flag doesn't go stale.
+    /// Routed through `POCController` rather than `SecureCredentialManager` directly, so the Settings UI's
+    /// `isSessionUnlocked` flag doesn't go stale. A "Never" preference still loses the in-memory session key on
+    /// app relaunch; it only disables this limit while Glance runs.
     func evaluate() {
-        guard SecureCredentialManager.isSessionUnlocked,
-              let lastActivityAt = SecureCredentialManager.lastActivityAt
-        else { return }
-
-        // A "Never" preference still loses the in-memory session key on app
-        // relaunch; it only disables the idle-timeout lock while Glance runs.
-        guard let idleLimit = GlanceSettings.shared.autoLockInterval.duration else { return }
-        guard Date().timeIntervalSince(lastActivityAt) >= idleLimit else { return }
-
-        pocController.lockSession()
+        pocController.lockSessionIfExpired()
     }
 }

@@ -49,19 +49,20 @@ enum SecureCredentialManager {
 
     nonisolated private static let sessionLock = NSLock()
     nonisolated(unsafe) private static var _cachedKey: SymmetricKey?
-    /// Last unlock or successful `readPassword` — what `SessionAutoLocker` compares against the idle limit. Guarded by
-    /// `sessionLock` alongside the key so the two can never be observed out of step.
-    nonisolated(unsafe) private static var _lastActivityAt: Date?
+    /// When Touch ID last unlocked the session — what the auto-lock limit is measured from. Deliberately not extended by
+    /// use, or a Mac unlocked daily would never need Touch ID again. Guarded by `sessionLock` alongside the key so the two
+    /// can never be observed out of step.
+    nonisolated(unsafe) private static var _sessionStartedAt: Date?
 
     nonisolated static var isSessionUnlocked: Bool {
         sessionLock.lock(); defer { sessionLock.unlock() }
         return _cachedKey != nil
     }
 
-    /// `nil` whenever the session is locked — there is no activity to age.
-    nonisolated static var lastActivityAt: Date? {
+    /// `nil` whenever the session is locked.
+    nonisolated static var sessionStartedAt: Date? {
         sessionLock.lock(); defer { sessionLock.unlock() }
-        return _lastActivityAt
+        return _sessionStartedAt
     }
 
     nonisolated private static func cachedKey() -> SymmetricKey? {
@@ -73,19 +74,12 @@ enum SecureCredentialManager {
         sessionLock.lock()
         let changed = (key != nil) != (_cachedKey != nil)
         _cachedKey = key
-        _lastActivityAt = key == nil ? nil : Date()
+        _sessionStartedAt = key == nil ? nil : Date()
         sessionLock.unlock()
         // Posted after releasing the lock — observers may call back into `isSessionUnlocked` (re-acquiring it) from a
         // background thread, so posting while still locked risks a real self-deadlock, not a theoretical one.
         guard changed else { return }
         NotificationCenter.default.post(name: .secureCredentialSessionDidChange, object: nil)
-    }
-
-    /// Resets the idle countdown on each successful use, so an actively-used session never auto-locks.
-    nonisolated private static func recordActivity() {
-        sessionLock.lock()
-        if _cachedKey != nil { _lastActivityAt = Date() }
-        sessionLock.unlock()
     }
 
     // MARK: - Generic session-key crypto (shared by passwords here and face embeddings in SecureFaceStore; requires an unlocked session)
@@ -179,10 +173,7 @@ enum SecureCredentialManager {
     nonisolated static func readPassword() throws -> Data {
         guard cachedKey() != nil else { throw SecureCredentialError.sessionLocked }
         let ciphertext = try KeychainManager.read(account: passwordBlobAccount)
-        let plaintext = try decrypt(ciphertext)
-        // Only on success: a failed read shouldn't extend the idle window.
-        recordActivity()
-        return plaintext
+        return try decrypt(ciphertext)
     }
 
     /// Deletes both Keychain items and clears the cached session key.

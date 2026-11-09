@@ -92,9 +92,12 @@ struct FaceIdentity: Codable, Identifiable, Equatable {
 
 enum FaceEnrollmentStoreError: LocalizedError {
     case storeUnreadable
+    case recognitionModelUnavailable
 
     var errorDescription: String? {
         switch self {
+        case .recognitionModelUnavailable:
+            return "Glance's face recognition model couldn't be loaded, so this enrollment wasn't saved. Try reinstalling Glance."
         case .storeUnreadable:
             return "Your enrolled faces couldn't be read, so nothing was saved — writing now would overwrite them."
         }
@@ -200,6 +203,7 @@ final class FaceEnrollmentStore {
     ) throws -> FaceIdentity? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !samples.isEmpty else { return nil }
+        guard embedder.isSuitableForUnlock else { throw FaceEnrollmentStoreError.recognitionModelUnavailable }
 
         // Local copy, only assigned once the write succeeds — otherwise a locked session would show an unsaved save.
         var updated = identities

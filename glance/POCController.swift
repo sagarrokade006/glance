@@ -57,6 +57,20 @@ final class POCController {
         isSessionUnlocked = false
     }
 
+    /// Locks the session if it has outlived the user's limit. Returns true if the session is now expired.
+    @discardableResult
+    func lockSessionIfExpired() -> Bool {
+        guard let startedAt = SecureCredentialManager.sessionStartedAt,
+              SessionExpiry.isExpired(
+                startedAt: startedAt,
+                limit: GlanceSettings.shared.autoLockInterval.duration,
+                now: Date()
+              )
+        else { return false }
+        lockSession()
+        return true
+    }
+
     // MARK: - Setup flow
 
     /// Encrypts and stores `passwordInput`. Requires the session to already
@@ -95,7 +109,8 @@ final class POCController {
             statusMessage = "Accessibility not granted — open System Settings and enable glance."
             return
         }
-        guard SecureCredentialManager.isSessionUnlocked else {
+        // Checked at the point of use: the periodic timer and wake check can both lag behind the deadline.
+        guard !lockSessionIfExpired(), SecureCredentialManager.isSessionUnlocked else {
             statusMessage = "Session locked — authenticate with Touch ID first."
             return
         }
@@ -112,7 +127,9 @@ final class POCController {
             try await Task.detached(priority: .userInitiated) {
                 var bytes = try SecureCredentialManager.readPassword()
                 defer { bytes.resetBytes(in: 0..<bytes.count) }
-                try KeystrokeInjector.typeAndReturn(bytes)
+                try KeystrokeInjector.typeAndReturn(bytes) {
+                    !requireAuthoritativeLock || LockMonitor.isScreenActuallyLocked()
+                }
             }.value
             statusMessage = "Injected stored password + Return at \(Date().formatted(date: .omitted, time: .standard))"
         } catch {

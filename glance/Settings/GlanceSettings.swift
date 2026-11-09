@@ -9,8 +9,10 @@
 import Foundation
 import Observation
 
-/// How long the Touch-ID-unlocked session may sit idle before it re-locks.
+/// How long after Touch ID the session re-locks, regardless of how often it is used.
 enum AutoLockInterval: Int, CaseIterable, Identifiable {
+    case oneDay = 1
+    case twoDays = 2
     case sevenDays = 7
     case fourteenDays = 14
     case thirtyDays = 30
@@ -21,6 +23,8 @@ enum AutoLockInterval: Int, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .never: return "Never"
+        case .oneDay: return "24 hours"
+        case .twoDays: return "48 hours"
         case .sevenDays: return "7 days"
         case .fourteenDays: return "14 days"
         case .thirtyDays: return "30 days"
@@ -33,7 +37,7 @@ enum AutoLockInterval: Int, CaseIterable, Identifiable {
         self == .never ? nil : TimeInterval(rawValue) * 24 * 60 * 60
     }
 
-    /// Position in `allCases`, used to drive the discrete 4-stop slider.
+    /// Position in `allCases`, used to drive the discrete stepped slider.
     var sliderIndex: Double {
         Double(Self.allCases.firstIndex(of: self) ?? 0)
     }
@@ -315,8 +319,9 @@ final class GlanceSettings {
         showUnlockAnimation = defaults.object(forKey: Key.showUnlockAnimation) as? Bool
             ?? (storedStyle != .none)
 
-        // On wake/lock by default, not on space — `.onSpace` needs Input
-        // Monitoring, which a fresh install shouldn't request unprompted.
+        // On wake only by default. `.onLock` would scan the moment you lock, and can unlock
+        // again behind you as you walk away. `.onSpace` needs Input Monitoring, which a
+        // fresh install shouldn't request unprompted.
         let storedTriggers = (defaults.array(forKey: Key.unlockTriggers) as? [String])?
             .compactMap { raw -> UnlockTrigger? in
                 // "onActivity" was merged into "onWake"; keep old installs working.
@@ -324,7 +329,7 @@ final class GlanceSettings {
                 return UnlockTrigger(rawValue: raw)
             }
         unlockTriggers = storedTriggers.map(Set.init).flatMap { $0.isEmpty ? nil : $0 }
-            ?? [.onWake, .onLock]
+            ?? [.onWake]
         retryOnHover = defaults.object(forKey: Key.retryOnHover) as? Bool ?? true
         faceDetectionSeconds = (defaults.object(forKey: Key.faceDetectionSeconds) as? Int)
             .map { min(max($0, Self.faceDetectionRange.lowerBound), Self.faceDetectionRange.upperBound) }

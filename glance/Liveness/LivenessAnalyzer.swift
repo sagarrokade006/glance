@@ -38,17 +38,35 @@ final class LivenessAnalyzer {
         lastGeometry = .empty
     }
 
+    /// Clears the motion window and positive evidence of life. Deny-cue counts survive.
+    func resetConfirmation() {
+        frames.removeAll()
+        evaluator.resetConfirmation()
+        lastGeometry = .empty
+    }
+
     /// Call once per frame with a detected face, regardless of whether it matched an identity,
     /// so liveness stays an independent gate. The window is time-pruned (~2s) but the evaluator's
     /// fire counts are not — they accumulate across the whole scan, so a spoof tell can't be waited out.
+    ///
+    /// With `countsTowardConfirmation` false (a face that can't be the owner), any confirmation so far is discarded
+    /// and this frame feeds only the deny cues, so one person's blink can't vouch for another face.
     @discardableResult
-    func observe(_ frame: LivenessFrame) -> LivenessSnapshot {
-        frames.append(frame)
-        frames.removeAll { frame.timestamp.timeIntervalSince($0.timestamp) > windowDuration }
-
+    func observe(_ frame: LivenessFrame, countsTowardConfirmation: Bool = true) -> LivenessSnapshot {
         evaluator.mode = modeProvider()
         evaluator.tuning = tuningProvider()
         evaluator.enabledCues = enabledCuesProvider()
+
+        guard countsTowardConfirmation else {
+            resetConfirmation()
+            let readings = LivenessCues.readings(window: [frame], geometry: .empty)
+            let snapshot = evaluator.observe(readings, countsTowardConfirmation: false)
+            lastSnapshot = snapshot
+            return snapshot
+        }
+
+        frames.append(frame)
+        frames.removeAll { frame.timestamp.timeIntervalSince($0.timestamp) > windowDuration }
 
         let geometry = GeometryLiveness.evaluate(frames)
         lastGeometry = geometry
