@@ -77,6 +77,8 @@ Open the `.dmg` file and drag Glance to `/Applications`, then open it.
 | **Camera & display** | Choose which camera to use, including different cameras for the built-in display vs. an external monitor. |
 | **Auto-locking sessions** | The Touch ID session re-locks itself a set time after you authenticate, from 24 hours to 30 days, however often it's used. |
 | **Activity history** | An encrypted, on-device log of unlocks, failed attempts, and spoof alerts. No images are stored. |
+| **Unlock conditions** | Optionally limit face unlock to trusted Wi-Fi networks, a connected Bluetooth device, or set hours. |
+| **Security levels** | Convenient, Balanced, and Strict presets for liveness, attention, and session length. |
 | **Attention check** | Only unlocks while your eyes are open and you're facing the screen. |
 | **Password health** | Checks your stored password with macOS and pauses face unlock if it stops working, so an old password isn't typed repeatedly. |
 | **Trackpad haptics** | Hovering over the notch will trigger haptics |

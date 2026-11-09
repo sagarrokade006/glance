@@ -56,6 +56,8 @@ struct RecognitionSettingsPage: View {
 
     private var unlockedState: some View {
         VStack(alignment: .leading, spacing: 20) {
+            SecurityLevelSection()
+
             SettingsGroup {
                 SettingsOptionSliderRowContent(
                     title: "Match confidence",
@@ -99,6 +101,8 @@ struct RecognitionSettingsPage: View {
                     }
                 }
             }
+
+            UnlockConditionsSection()
         }
     }
 

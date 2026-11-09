@@ -168,6 +168,9 @@ final class FaceUnlockCoordinator {
                 detail: "Too many failed attempts. Enter your password."
             )
         }
+        if let unmet = unmetUnlockCondition {
+            return NotchNotice(symbol: "shield.slash.fill", title: "Enter your password", detail: unmet.detail)
+        }
         return nil
     }
 
@@ -177,6 +180,19 @@ final class FaceUnlockCoordinator {
         if attemptLimiter.isLockedOut {
             ActivityStore.shared.record(.paused, detail: "\(attemptLimiter.maxFailures) failed attempts.")
         }
+    }
+
+    /// System lookups only run for conditions the user has turned on.
+    private var unmetUnlockCondition: UnmetUnlockCondition? {
+        let conditions = GlanceSettings.shared.unlockConditions
+        let environment = TrustedEnvironment.shared
+        return conditions.firstUnmet(
+            now: Date(),
+            calendar: .current,
+            networkName: conditions.requiresTrustedNetwork ? environment.currentNetworkName() : nil,
+            isBluetoothConnected: conditions.requiresBluetoothDevice
+                && conditions.bluetoothAddress.map(environment.isBluetoothDeviceConnected(address:)) == true
+        )
     }
 
     /// Records why no scan can run and, unless animations are off, explains it in the notch.

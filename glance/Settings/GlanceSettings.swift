@@ -110,6 +110,7 @@ final class GlanceSettings {
         static let livenessChecksEnabled = "GlanceSettings.livenessChecksEnabled"
         static let livenessMode = "GlanceSettings.livenessMode"
         static let requiresAttention = "GlanceSettings.requiresAttention"
+        static let unlockConditions = "GlanceSettings.unlockConditions"
         static let minimumFaceWidth = "GlanceSettings.minimumFaceWidth"
         static let unlockAnimationStyle = "GlanceSettings.unlockAnimationStyle"
         static let showUnlockAnimation = "GlanceSettings.showUnlockAnimation"
@@ -152,6 +153,13 @@ final class GlanceSettings {
     /// see `LivenessMode`.
     var livenessMode: LivenessMode {
         didSet { defaults.set(livenessMode.rawValue, forKey: Key.livenessMode) }
+    }
+    var unlockConditions: UnlockConditions {
+        didSet {
+            if let data = try? JSONEncoder().encode(unlockConditions) {
+                defaults.set(data, forKey: Key.unlockConditions)
+            }
+        }
     }
     /// Requires open eyes and a face turned toward the screen, so being in frame isn't enough to unlock.
     var requiresAttention: Bool {
@@ -313,6 +321,9 @@ final class GlanceSettings {
         livenessMode = defaults.string(forKey: Key.livenessMode)
             .flatMap(LivenessMode.init(rawValue:)) ?? .light
         requiresAttention = defaults.object(forKey: Key.requiresAttention) as? Bool ?? true
+        unlockConditions = defaults.data(forKey: Key.unlockConditions)
+            .flatMap { try? JSONDecoder().decode(UnlockConditions.self, from: $0) }
+            ?? UnlockConditions()
         // Matches `DetectionDistanceLevel.standard` — see RecognitionSettingsPage.swift.
         minimumFaceWidth = defaults.object(forKey: Key.minimumFaceWidth) as? Float ?? 0.21
 
