@@ -106,15 +106,25 @@ struct PasswordSettingsPage: View {
 
                 SettingsGroupDivider()
 
-                SettingsSteppedSliderRowContent(
-                    title: "Auto lock session",
-                    valueLabel: settings.autoLockInterval.title,
-                    index: Binding(
-                        get: { settings.autoLockInterval.sliderIndex },
-                        set: { settings.autoLockInterval = .from(sliderIndex: $0) }
-                    ),
-                    stopCount: AutoLockInterval.allCases.count
-                )
+                if FreshAuthentication.shared.isAuthorized {
+                    SettingsSteppedSliderRowContent(
+                        title: "Auto lock session",
+                        valueLabel: settings.autoLockInterval.title,
+                        index: Binding(
+                            get: { settings.autoLockInterval.sliderIndex },
+                            set: { settings.autoLockInterval = .from(sliderIndex: $0) }
+                        ),
+                        stopCount: AutoLockInterval.allCases.count
+                    )
+                } else {
+                    SettingsRowContent(title: "Auto lock session", subtitle: settings.autoLockInterval.title) {
+                        SettingsPrimaryButton(title: "Change", compact: true) {
+                            Task {
+                                _ = await FreshAuthentication.shared.require(reason: "change the Glance session limit")
+                            }
+                        }
+                    }
+                }
 
                 SettingsGroupDivider()
 
@@ -229,6 +239,13 @@ struct PasswordSettingsPage: View {
     /// `deletePassword()` clears the cached session key, and deleting the
     /// face store requires an unlocked session.
     private func removePassword() {
+        Task {
+            guard await FreshAuthentication.shared.require(reason: "remove your face and password from Glance") else { return }
+            performRemovePassword()
+        }
+    }
+
+    private func performRemovePassword() {
         do {
             FaceEnrollmentStore.shared.deleteAll()
             ActivityStore.shared.clear()

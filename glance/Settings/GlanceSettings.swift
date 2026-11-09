@@ -142,28 +142,41 @@ final class GlanceSettings {
         didSet { defaults.set(isFaceUnlockEnabled, forKey: Key.isFaceUnlockEnabled) }
     }
     var matchThreshold: Float {
-        didSet { defaults.set(matchThreshold, forKey: Key.matchThreshold) }
+        didSet {
+            defaults.set(matchThreshold, forKey: Key.matchThreshold)
+            SecurityPolicyGuard.shared.sealCurrentSettings()
+        }
     }
     /// Master switch for liveness checking. Off means face recognition
     /// alone decides an unlock — a photo of the enrolled user would pass.
     var livenessChecksEnabled: Bool {
-        didSet { defaults.set(livenessChecksEnabled, forKey: Key.livenessChecksEnabled) }
+        didSet {
+            defaults.set(livenessChecksEnabled, forKey: Key.livenessChecksEnabled)
+            SecurityPolicyGuard.shared.sealCurrentSettings()
+        }
     }
     /// Light (deny-only) vs Heavy (deny plus a required proof of life) —
     /// see `LivenessMode`.
     var livenessMode: LivenessMode {
-        didSet { defaults.set(livenessMode.rawValue, forKey: Key.livenessMode) }
+        didSet {
+            defaults.set(livenessMode.rawValue, forKey: Key.livenessMode)
+            SecurityPolicyGuard.shared.sealCurrentSettings()
+        }
     }
     var unlockConditions: UnlockConditions {
         didSet {
             if let data = try? JSONEncoder().encode(unlockConditions) {
                 defaults.set(data, forKey: Key.unlockConditions)
             }
+            SecurityPolicyGuard.shared.sealCurrentSettings()
         }
     }
     /// Requires open eyes and a face turned toward the screen, so being in frame isn't enough to unlock.
     var requiresAttention: Bool {
-        didSet { defaults.set(requiresAttention, forKey: Key.requiresAttention) }
+        didSet {
+            defaults.set(requiresAttention, forKey: Key.requiresAttention)
+            SecurityPolicyGuard.shared.sealCurrentSettings()
+        }
     }
     /// Mirrored into `FaceRecognitionPipeline.minimumProminentFaceWidth` on
     /// every change, since that's read from a background `nonisolated` context.
@@ -171,6 +184,7 @@ final class GlanceSettings {
         didSet {
             defaults.set(minimumFaceWidth, forKey: Key.minimumFaceWidth)
             FaceRecognitionPipeline.minimumProminentFaceWidth = minimumFaceWidth
+            SecurityPolicyGuard.shared.sealCurrentSettings()
         }
     }
     /// The remembered choice (`.minimal`/`.original` only); `showUnlockAnimation`
@@ -271,7 +285,10 @@ final class GlanceSettings {
     /// Enforced by `SessionAutoLocker`, not here — this is only the stored
     /// preference.
     var autoLockInterval: AutoLockInterval {
-        didSet { defaults.set(autoLockInterval.rawValue, forKey: Key.autoLockIntervalDays) }
+        didSet {
+            defaults.set(autoLockInterval.rawValue, forKey: Key.autoLockIntervalDays)
+            SecurityPolicyGuard.shared.sealCurrentSettings()
+        }
     }
     /// Device `uniqueID`s, not device objects — devices can disconnect/
     /// reconnect between launches, but their unique ID is stable.
@@ -308,24 +325,51 @@ final class GlanceSettings {
         didSet { defaults.set(hasAcknowledgedSecurityNotice, forKey: Key.hasAcknowledgedSecurityNotice) }
     }
 
+    var securitySnapshot: SecurityPolicySnapshot {
+        SecurityPolicySnapshot(
+            matchThreshold: matchThreshold,
+            minimumFaceWidth: minimumFaceWidth,
+            livenessEnabled: livenessChecksEnabled,
+            livenessMode: livenessMode.rawValue,
+            requiresAttention: requiresAttention,
+            autoLockDays: autoLockInterval.rawValue,
+            conditions: unlockConditions
+        )
+    }
+
+    /// Used when security settings were changed outside the app and can no longer be trusted.
+    func restoreSecureDefaults() {
+        matchThreshold = 0.66
+        minimumFaceWidth = 0.21
+        livenessChecksEnabled = true
+        livenessMode = SecurityLevel.balanced.livenessMode
+        requiresAttention = SecurityLevel.balanced.requiresAttention
+        autoLockInterval = AutoLockInterval(rawValue: SecurityLevel.balanced.sessionLimitDays) ?? .twoDays
+        unlockConditions = UnlockConditions()
+    }
+
     private init() {
         // Enabled by default — onboarding already enrolled a face and set a
         // password specifically to use Face Unlock.
         isFaceUnlockEnabled = defaults.object(forKey: Key.isFaceUnlockEnabled) as? Bool ?? true
         // Matches `MatchConfidenceLevel.standard` — see RecognitionSettingsPage.swift.
-        matchThreshold = defaults.object(forKey: Key.matchThreshold) as? Float ?? 0.66
+        matchThreshold = SecuritySettingLimits.clamped(
+            defaults.object(forKey: Key.matchThreshold) as? Float ?? 0.66,
+            to: SecuritySettingLimits.matchThreshold
+        )
         livenessChecksEnabled = defaults.object(forKey: Key.livenessChecksEnabled) as? Bool ?? true
-        // Light by default — Heavy requires a blink/pose/depth signal a
-        // still, non-blinking user may never produce, while Light still
-        // catches the main attack (a photo on a phone screen).
+        // Heavy by default: Light can't reject a printed photo, because no deny cue fires on paper.
         livenessMode = defaults.string(forKey: Key.livenessMode)
-            .flatMap(LivenessMode.init(rawValue:)) ?? .light
+            .flatMap(LivenessMode.init(rawValue:)) ?? .heavy
         requiresAttention = defaults.object(forKey: Key.requiresAttention) as? Bool ?? true
         unlockConditions = defaults.data(forKey: Key.unlockConditions)
             .flatMap { try? JSONDecoder().decode(UnlockConditions.self, from: $0) }
             ?? UnlockConditions()
         // Matches `DetectionDistanceLevel.standard` — see RecognitionSettingsPage.swift.
-        minimumFaceWidth = defaults.object(forKey: Key.minimumFaceWidth) as? Float ?? 0.21
+        minimumFaceWidth = SecuritySettingLimits.clamped(
+            defaults.object(forKey: Key.minimumFaceWidth) as? Float ?? 0.21,
+            to: SecuritySettingLimits.minimumFaceWidth
+        )
 
         // Resolve the stored style first, `.none` included, then split it
         // into the pick + the on/off flag the UI now works in.
@@ -368,9 +412,9 @@ final class GlanceSettings {
         preferredDisplayID = defaults.string(forKey: Key.preferredDisplayID)
         preferredDisplayName = defaults.string(forKey: Key.preferredDisplayName)
 
-        // Defaults to 30 days
+        // 48 hours by default, the same limit Face ID uses before asking for the passcode again.
         autoLockInterval = (defaults.object(forKey: Key.autoLockIntervalDays) as? Int)
-            .flatMap(AutoLockInterval.init(rawValue:)) ?? .thirtyDays
+            .flatMap(AutoLockInterval.init(rawValue:)) ?? .twoDays
         defaultCameraID = defaults.string(forKey: Key.defaultCameraID)
         builtInDisplayCameraID = defaults.string(forKey: Key.builtInDisplayCameraID)
         externalDisplayCameraID = defaults.string(forKey: Key.externalDisplayCameraID)

@@ -20,7 +20,7 @@ enum CameraDeviceCatalog {
             mediaType: .video,
             position: .unspecified
         )
-        return discovery.devices.map { CameraDevice(id: $0.uniqueID, name: $0.localizedName) }
+        return discovery.devices.filter(isTrusted).map { CameraDevice(id: $0.uniqueID, name: $0.localizedName) }
     }
 
     /// True if the currently-active screen is the Mac's built-in display
@@ -33,17 +33,25 @@ enum CameraDeviceCatalog {
         return CGDisplayIsBuiltin(screenNumber) != 0
     }
 
-    /// Display-specific override, then flat default, then the system default camera.
+    static func isTrusted(_ device: AVCaptureDevice) -> Bool {
+        CameraTrust.allows(
+            isBuiltIn: device.deviceType == .builtInWideAngleCamera,
+            isContinuityCamera: device.isContinuityCamera,
+            transportType: device.transportType
+        )
+    }
+
+    /// Display-specific override, then flat default, then the system default camera. Never returns a virtual camera.
     static func resolvedDevice() -> AVCaptureDevice? {
         let settings = GlanceSettings.shared
         let preferredID = isUsingBuiltInDisplay()
             ? (settings.builtInDisplayCameraID ?? settings.defaultCameraID)
             : (settings.externalDisplayCameraID ?? settings.defaultCameraID)
 
-        if let preferredID, let device = AVCaptureDevice(uniqueID: preferredID) {
+        if let preferredID, let device = AVCaptureDevice(uniqueID: preferredID), isTrusted(device) {
             return device
         }
         return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-            ?? AVCaptureDevice.default(for: .video)
+            ?? AVCaptureDevice.default(for: .video).flatMap { isTrusted($0) ? $0 : nil }
     }
 }

@@ -108,7 +108,7 @@ enum SecurityLevel: String, CaseIterable, Identifiable {
     var sessionLimitDays: Int {
         switch self {
         case .convenience: return 30
-        case .balanced: return 7
+        case .balanced: return 2
         case .strict: return 1
         }
     }

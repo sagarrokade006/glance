@@ -8,6 +8,7 @@
 import Foundation
 import CoreGraphics
 import Observation
+import os
 
 nonisolated struct FaceRecognitionResult {
     let embedding: [Float]
@@ -90,7 +91,12 @@ final class FaceRecognitionPipeline {
     }
 
     /// Below this fraction of frame width, a face is treated as a bystander, not a candidate — shared with onboarding's "move closer" prompt. `nonisolated(unsafe)` because it's read from a background-task static func that can't touch GlanceSettings' MainActor-isolated storage.
-    nonisolated(unsafe) static var minimumProminentFaceWidth: Float = 0.18
+    nonisolated static var minimumProminentFaceWidth: Float {
+        get { minimumProminentFaceWidthStorage.withLock { $0 } }
+        set { minimumProminentFaceWidthStorage.withLock { $0 = newValue } }
+    }
+
+    nonisolated private static let minimumProminentFaceWidthStorage = OSAllocatedUnfairLock<Float>(initialState: 0.18)
 
     /// Max normalized-coordinate drift between frames still counted as "the same person".
     nonisolated private static let continuityDistanceTolerance: CGFloat = 0.3
@@ -142,7 +148,8 @@ extension FaceRecognitionPipeline {
 
     /// Shared by Face Lab and FaceUnlockCoordinator so tuning stays consistent. No runner-up margin check: the same person can be enrolled multiple times under different appearances, so two of their own profiles legitimately score close together — a margin check can't tell that apart from two different people colliding.
     nonisolated func bestMatch(in scored: [ScoredIdentity], threshold: Float) -> ScoredIdentity? {
-        guard let first = scored.first, !first.identity.isStale(comparedTo: embedder) else { return nil }
+        // Skips stale identities rather than stopping at one, so an old enrollment can't block a valid one.
+        guard let first = scored.first(where: { !$0.identity.isStale(comparedTo: embedder) }) else { return nil }
         guard first.centroidSimilarity >= threshold, first.maxSampleSimilarity >= threshold else { return nil }
         return first
     }

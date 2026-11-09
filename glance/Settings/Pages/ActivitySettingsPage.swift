@@ -113,6 +113,7 @@ struct ActivitySettingsPage: View {
         case .spoofSuspected: return "xmark.circle.fill"
         case .passwordEntryFailed, .passwordRejected: return "key.fill"
         case .paused: return "pause.circle.fill"
+        case .securitySettingsRestored: return "exclamationmark.shield.fill"
         }
     }
 
@@ -120,7 +121,7 @@ struct ActivitySettingsPage: View {
         switch kind {
         case .unlocked: return .green
         case .notRecognized, .spoofSuspected: return .red
-        case .passwordEntryFailed, .passwordRejected, .paused: return .orange
+        case .passwordEntryFailed, .passwordRejected, .paused, .securitySettingsRestored: return .orange
         }
     }
 

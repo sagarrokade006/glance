@@ -15,6 +15,7 @@ enum ActivityKind: String, Codable, Equatable {
     case passwordEntryFailed
     case passwordRejected
     case paused
+    case securitySettingsRestored
 
     var title: String {
         switch self {
@@ -24,6 +25,7 @@ enum ActivityKind: String, Codable, Equatable {
         case .passwordEntryFailed: return "Couldn't enter password"
         case .passwordRejected: return "Password not accepted"
         case .paused: return "Face unlock paused"
+        case .securitySettingsRestored: return "Security settings restored"
         }
     }
 

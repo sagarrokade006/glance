@@ -126,7 +126,7 @@ final class CameraManager: NSObject {
     /// Called on every `start()` so a camera preference change in Settings takes effect without an app restart.
     private func reconcileDeviceIfNeeded() {
         guard let device = CameraDeviceCatalog.resolvedDevice() else {
-            errorMessage = "No camera device found."
+            errorMessage = "No trusted camera found. Virtual cameras can't be used with Glance."
             return
         }
         guard device.uniqueID != currentInput?.device.uniqueID else { return }

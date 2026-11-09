@@ -54,7 +54,20 @@ struct RecognitionSettingsPage: View {
 
     // MARK: - Unlocked
 
+    private var canChangeSettings: Bool { FreshAuthentication.shared.isAuthorized }
+
     private var unlockedState: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if !canChangeSettings {
+                SecuritySettingsUnlockRow()
+            }
+            protectedSettings
+                .disabled(!canChangeSettings)
+                .opacity(canChangeSettings ? 1 : 0.55)
+        }
+    }
+
+    private var protectedSettings: some View {
         VStack(alignment: .leading, spacing: 20) {
             SecurityLevelSection()
 
@@ -162,9 +175,9 @@ private enum MatchConfidenceLevel: Int, CaseIterable {
 
     var threshold: Float {
         switch self {
-        case .lessStrict: return 0.58
-        case .standard: return 0.63
-        case .moreStrict: return 0.68
+        case .lessStrict: return 0.60
+        case .standard: return 0.66
+        case .moreStrict: return 0.72
         }
     }
 

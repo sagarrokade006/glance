@@ -284,7 +284,10 @@ final class OnboardingController {
     /// Enrollment-only flows persist as soon as naming is confirmed, so Touch ID has to
     /// happen up front — there's no later password step to unlock the session.
     private static func unlockForEnrollment(reason: String) async -> Bool {
-        guard !SecureCredentialManager.isSessionUnlocked else { return true }
+        // An unlocked session isn't enough to add a face, the same way Face ID asks for the passcode.
+        guard !SecureCredentialManager.isSessionUnlocked else {
+            return await FreshAuthentication.shared.require(reason: "enroll a face in Glance")
+        }
         do {
             try await Task.detached(priority: .userInitiated) {
                 try SecureCredentialManager.unlockSession(reason: reason)
@@ -308,6 +311,9 @@ final class OnboardingController {
     /// `finish(password:)` re-asserts that anyway.
     static func startPasswordOnly() {
         Task { @MainActor in
+            if SecureCredentialManager.hasStoredPassword() {
+                guard await FreshAuthentication.shared.require(reason: "change the password Glance stores") else { return }
+            }
             let controller = OnboardingController(isPasswordOnly: true)
             NotchOverlayController.shared.presentOnboarding(controller)
         }

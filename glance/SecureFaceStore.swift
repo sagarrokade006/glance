@@ -36,7 +36,9 @@ nonisolated enum SecureFaceStore {
     /// Throws `.sessionLocked` rather than returning an empty array, so callers can distinguish "nothing enrolled" from "enrolled, but locked".
     static func load() throws -> [FaceIdentity] {
         guard SecureCredentialManager.isSessionUnlocked else { throw SecureFaceStoreError.sessionLocked }
-        guard let ciphertext = try? Data(contentsOf: fileURL) else { return [] }
+        guard exists else { return [] }
+        // A file that exists but can't be read isn't an empty store, so this must throw.
+        let ciphertext = try Data(contentsOf: fileURL)
         let plaintext = try SecureCredentialManager.decrypt(ciphertext)
         return try JSONDecoder().decode([FaceIdentity].self, from: plaintext)
     }

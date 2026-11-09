@@ -145,6 +145,10 @@ final class FaceEnrollmentStore {
     /// `isLocked = true`) if the session isn't unlocked yet.
     func reloadIfUnlocked() {
         guard SecureCredentialManager.isSessionUnlocked else {
+            // Face data doesn't stay in memory after the session locks.
+            identities = []
+            hasLoadedSuccessfully = false
+            loadFailure = nil
             isLocked = true
             return
         }
@@ -156,6 +160,7 @@ final class FaceEnrollmentStore {
             // Deliberately not `(try? load()) ?? []` — a store we couldn't read isn't an empty store, and the next
             // write must not persist an empty array over a file that still holds every sample.
             identities = []
+            hasLoadedSuccessfully = false
             loadFailure = error.localizedDescription
         }
         isLocked = false
@@ -204,6 +209,7 @@ final class FaceEnrollmentStore {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !samples.isEmpty else { return nil }
         guard embedder.isSuitableForUnlock else { throw FaceEnrollmentStoreError.recognitionModelUnavailable }
+        guard hasLoadedSuccessfully else { throw FaceEnrollmentStoreError.storeUnreadable }
 
         // Local copy, only assigned once the write succeeds — otherwise a locked session would show an unsaved save.
         var updated = identities

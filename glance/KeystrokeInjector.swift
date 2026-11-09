@@ -48,7 +48,8 @@ enum KeystrokeInjector {
             throw KeystrokeError.eventCreationFailed
         }
         let source = CGEventSource(stateID: .hidSystemState)
-        let utf16 = Array(text.utf16)
+        var utf16 = Array(text.utf16)
+        defer { utf16.indices.forEach { utf16[$0] = 0 } }
         let steps = InjectionPlan.steps(utf16: utf16, maxBatchLength: maximumUnicodeBatchLength)
         try utf16.withUnsafeBufferPointer { buffer in
             try InjectionPlan.run(steps, isStillLocked: isStillLocked) { step in

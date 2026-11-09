@@ -84,6 +84,18 @@ enum SecureCredentialManager {
 
     // MARK: - Generic session-key crypto (shared by passwords here and face embeddings in SecureFaceStore; requires an unlocked session)
 
+    nonisolated static let policySealAccount = "policySeal"
+
+    /// Separate from the encryption key, so sealing settings and encrypting data never share key material.
+    nonisolated static func derivedPolicyKey() -> SymmetricKey? {
+        guard let key = cachedKey() else { return nil }
+        return HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: key,
+            info: Data("glance.security-policy-seal".utf8),
+            outputByteCount: 32
+        )
+    }
+
     nonisolated static func encrypt(_ plaintext: Data) throws -> Data {
         guard let key = cachedKey() else { throw SecureCredentialError.sessionLocked }
         do {
@@ -178,6 +190,7 @@ enum SecureCredentialManager {
 
     /// Deletes both Keychain items and clears the cached session key.
     nonisolated static func deletePassword() throws {
+        try KeychainManager.delete(account: policySealAccount)
         try KeychainManager.delete(account: passwordBlobAccount)
         try KeychainManager.delete(account: sessionKeyAccount)
         setCachedKey(nil)

@@ -114,7 +114,17 @@ Glance won't type your password simply because a face matches. An unlock require
 5. Accessibility permission is available to enter the password.
 6. Fewer than five face attempts have failed since the Mac was last unlocked.
 
-Face recognition and liveness detection run independently and must both succeed before the password is entered. 
+Face recognition and liveness detection run independently and must both succeed before the password is entered.
+
+### Protections modeled on Face ID
+
+Glance can't match Face ID's hardware, but it follows the same rules where software allows:
+
+- Touch ID or your Mac password is required after every restart and at least every 48 hours by default.
+- Face unlock pauses after 5 failed attempts until the Mac is unlocked another way.
+- Adding a face, changing the stored password, and changing security settings each require fresh authentication.
+- Only real cameras are accepted. Virtual cameras are refused because they can feed in prerecorded video.
+- Security settings changed outside Glance are detected and restored to safe defaults.
 
 ### Local by design
 

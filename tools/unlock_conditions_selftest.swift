@@ -9,10 +9,12 @@
 //        glance/Liveness/LivenessCues.swift \
 //        glance/Liveness/LivenessScoring.swift \
 //        glance/UnlockConditions.swift \
+//        glance/SecurityPolicy.swift \
 //        tools/unlock_conditions_selftest.swift \
 //      && /tmp/unlock_conditions_selftest
 //
 
+import CryptoKit
 import Foundation
 
 private var failureCount = 0
@@ -113,6 +115,41 @@ struct UnlockConditionsSelfTest {
             SecurityLevel.matching(livenessEnabled: true, livenessMode: .heavy, requiresAttention: false, sessionLimitDays: 7) == nil,
             "Mixed settings are custom"
         )
+
+        let key = SymmetricKey(size: .bits256)
+        let otherKey = SymmetricKey(size: .bits256)
+        let policy = SecurityPolicySnapshot(
+            matchThreshold: 0.66, minimumFaceWidth: 0.21, livenessEnabled: true, livenessMode: "heavy",
+            requiresAttention: true, autoLockDays: 2, conditions: UnlockConditions()
+        )
+        if let seal = SecurityPolicySeal.seal(policy, key: key) {
+            check(SecurityPolicySeal.isValid(seal, for: policy, key: key), "An unchanged policy verifies")
+            check(!SecurityPolicySeal.isValid(seal, for: policy, key: otherKey), "A seal can't be forged without the session key")
+
+            var weakened = policy
+            weakened.livenessEnabled = false
+            check(!SecurityPolicySeal.isValid(seal, for: weakened, key: key), "Turning liveness off is detected")
+            weakened = policy
+            weakened.matchThreshold = 0.60
+            check(!SecurityPolicySeal.isValid(seal, for: weakened, key: key), "Lowering the threshold is detected")
+            weakened = policy
+            weakened.conditions.requiresSchedule = true
+            check(!SecurityPolicySeal.isValid(seal, for: weakened, key: key), "Changing conditions is detected")
+        } else {
+            check(false, "A policy can be sealed")
+        }
+
+        func code(_ text: String) -> Int32 { Int32(bitPattern: CameraTrust.fourCharacterCode(text)) }
+        check(code("bltn") == 1_651_274_862, "Four-character codes match what macOS reports")
+        check(CameraTrust.allows(isBuiltIn: true, isContinuityCamera: false, transportType: code("bltn")), "The built-in camera is trusted")
+        check(CameraTrust.allows(isBuiltIn: false, isContinuityCamera: false, transportType: code("usb ")), "A USB camera is trusted")
+        check(CameraTrust.allows(isBuiltIn: false, isContinuityCamera: true, transportType: code("othr")), "Continuity Camera is trusted")
+        check(!CameraTrust.allows(isBuiltIn: false, isContinuityCamera: false, transportType: code("virt")), "A virtual camera is refused")
+        check(!CameraTrust.allows(isBuiltIn: false, isContinuityCamera: false, transportType: code("othr")), "An unknown transport is refused")
+        check(!CameraTrust.allows(isBuiltIn: false, isContinuityCamera: false, transportType: 0), "A missing transport is refused")
+
+        check(SecuritySettingLimits.clamped(-1, to: SecuritySettingLimits.matchThreshold) == 0.60, "A tampered low threshold is clamped")
+        check(SecuritySettingLimits.clamped(0.66, to: SecuritySettingLimits.matchThreshold) == 0.66, "A valid threshold is kept")
 
         guard failureCount == 0 else {
             print("\n\(failureCount) unlock conditions self-test(s) FAILED.")

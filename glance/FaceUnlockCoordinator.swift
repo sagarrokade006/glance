@@ -147,6 +147,7 @@ final class FaceUnlockCoordinator {
 
     /// Why no scan may start right now, if anything. Checked by every path that can start one.
     private var scanBlockedNotice: NotchNotice? {
+        SecurityPolicyGuard.shared.verifyIfNeeded()
         if pipeline.usingFallbackEmbedder {
             return NotchNotice(
                 symbol: "exclamationmark.triangle.fill",
@@ -490,13 +491,16 @@ final class FaceUnlockCoordinator {
 
             let pipeline = self.pipeline
             let previousBoundingBox = lastFaceBoundingBox
-            let outcome = await Task.detached(priority: .userInitiated) { () -> (FaceRecognitionResult, LivenessFrame)? in
+            // `activeIdentities`, not `identities`: someone switched off on the Your Face page stays enrolled but must not unlock.
+            let identities = FaceEnrollmentStore.shared.activeIdentities
+            let outcome = await Task.detached(priority: .userInitiated) { () -> (FaceRecognitionResult, LivenessFrame, [ScoredIdentity])? in
                 guard let result = try? pipeline.recognize(in: frame.image, preferNear: previousBoundingBox) else { return nil }
                 let faceCrop = CameraManager.renderCrop(from: frame, imageRect: result.face.boundingBox)
-                return (result, LivenessFeatureExtractor.extract(from: result, frame: frame.image, faceCrop: faceCrop))
+                let scored = pipeline.score(result.embedding, against: identities)
+                return (result, LivenessFeatureExtractor.extract(from: result, frame: frame.image, faceCrop: faceCrop), scored)
             }.value
 
-            guard let (result, livenessFrame) = outcome else {
+            guard let (result, livenessFrame, scored) = outcome else {
                 gate.observeNoFace(at: Date())
                 lastFaceBoundingBox = nil
                 try? await Task.sleep(nanoseconds: 20_000_000)
@@ -504,8 +508,6 @@ final class FaceUnlockCoordinator {
             }
             lastFaceBoundingBox = result.face.normalizedBoundingBox
 
-            // `activeIdentities`, not `identities`: someone switched off on the Your Face page stays enrolled but must not unlock.
-            let scored = pipeline.score(result.embedding, against: FaceEnrollmentStore.shared.activeIdentities)
             let matched = pipeline.bestMatch(in: scored, threshold: matchThreshold)
             // The closest single sample, not the centroid: a turned head can sit far from the average of all poses.
             let bestSimilarity = scored
