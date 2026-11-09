@@ -43,3 +43,38 @@ struct NotchMessageView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+
+struct HeadTurnPrompt: Equatable {
+    let direction: HeadTurnDirection
+    let progress: Float
+
+    var isComplete: Bool { progress >= 1 }
+}
+
+struct NotchChallengeView: View {
+    let prompt: HeadTurnPrompt
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().stroke(.white.opacity(0.18), lineWidth: 4)
+                Circle()
+                    .trim(from: 0, to: CGFloat(prompt.progress))
+                    .stroke(.green, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Image(systemName: prompt.isComplete ? "eye.fill" : prompt.direction.symbol)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 48, height: 48)
+            .animation(.easeOut(duration: 0.15), value: prompt.progress)
+
+            Text(prompt.isComplete ? "Now look at the screen" : prompt.direction.prompt)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 26)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}

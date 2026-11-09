@@ -73,6 +73,8 @@ enum LivenessMode: String, CaseIterable, Identifiable, Sendable {
     /// Deny cues plus at least one confirm cue must fire. Can block a user who holds
     /// perfectly still and never blinks for the whole scan.
     case heavy
+    /// Everything Heavy requires, plus turning toward a randomly chosen side.
+    case challenge
 
     var id: String { rawValue }
 
@@ -80,6 +82,7 @@ enum LivenessMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .light: return "Light"
         case .heavy: return "Heavy"
+        case .challenge: return "Challenge"
         }
     }
 
@@ -87,6 +90,7 @@ enum LivenessMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .light: return "Only rejects obvious spoofs."
         case .heavy: return "Also requires proof of a real face."
+        case .challenge: return "Also asks you to turn your head to a random side."
         }
     }
 }

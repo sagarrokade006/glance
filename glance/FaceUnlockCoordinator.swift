@@ -33,7 +33,7 @@ final class FaceUnlockCoordinator {
     }
     /// Shares its setting with NotchOverlayController's scanning timeout, so the background loop stops in step with the UI collapsing.
     private var scanWindowDuration: TimeInterval {
-        TimeInterval(GlanceSettings.shared.faceDetectionSeconds)
+        TimeInterval(GlanceSettings.shared.scanSeconds)
     }
     /// Failed scans at the current lock screen. Cleared only by a confirmed real unlock, so waking the display can't reset it.
     private var attemptLimiter = UnlockAttemptLimiter()
@@ -391,6 +391,13 @@ final class FaceUnlockCoordinator {
         }
     }
 
+    private func showChallengePrompt(for gate: UnlockGate) {
+        guard let challenge = gate.challenge else { return }
+        NotchOverlayController.shared.showChallenge(
+            HeadTurnPrompt(direction: challenge.direction, progress: challenge.progress)
+        )
+    }
+
     /// Watches whether macOS accepted the typed password. The success animation has already played by now.
     private func confirmPasswordEntry(detail: String?) {
         let monitor = lockMonitor
@@ -441,7 +448,12 @@ final class FaceUnlockCoordinator {
         liveness.modeProvider = { GlanceSettings.shared.livenessMode }
         var policy = UnlockGatePolicy.standard
         policy.requiresAttention = GlanceSettings.shared.requiresAttention
-        let gate = UnlockGate(policy: policy, liveness: livenessEnabled ? liveness : nil)
+        // Without an overlay there's nowhere to show the prompt, so a headless scan falls back to Heavy's checks.
+        let challenge = livenessEnabled && GlanceSettings.shared.livenessMode == .challenge && requireOverlayScanning
+            ? HeadTurnChallenge(direction: HeadTurnDirection.allCases.randomElement() ?? .left)
+            : nil
+        let gate = UnlockGate(policy: policy, liveness: livenessEnabled ? liveness : nil, challenge: challenge)
+        showChallengePrompt(for: gate)
         /// Last frame's selected face, passed back so `selectDominantFace` stays on the same person instead of flip-flopping.
         var lastFaceBoundingBox: CGRect?
         /// Cheap way to detect "no new camera frame yet" vs. "fresh frame" — without it a repeat frame would corrupt the liveness motion signal.
@@ -486,7 +498,9 @@ final class FaceUnlockCoordinator {
                 .max()
             let faceClass = gate.policy.classify(isMatch: matched != nil, bestSimilarity: bestSimilarity)
 
-            switch gate.observeFace(faceClass, frame: livenessFrame, at: Date()) {
+            let decision = gate.observeFace(faceClass, frame: livenessFrame, at: Date())
+            showChallengePrompt(for: gate)
+            switch decision {
             case .spoof(let reason):
                 // Overrides everything, including a match and any confirmation that already happened.
                 lastOutcome = reason

@@ -100,6 +100,7 @@ struct UnlockGateSelfTest {
         testWrongFace()
         testFrameFreshnessAndClassification()
         testAttention()
+        testHeadTurnChallenge()
         testAttemptLimiter()
         testSessionExpiry()
         testInjectionPlan()
@@ -268,6 +269,80 @@ struct UnlockGateSelfTest {
         _ = feed(interrupted, eyes: 0.05, count: 1, from: 2)
         check(feed(interrupted, eyes: 0.3, count: 2, from: 3) == .keepScanning, "Looking away restarts the consecutive count")
         check(feed(interrupted, eyes: 0.3, count: 1, from: 5) == .unlock(confirmedBy: nil), "Attention must hold for the full count")
+    }
+
+    @MainActor
+    private static func testHeadTurnChallenge() {
+        var left = HeadTurnChallenge(direction: .left)
+        left.observe(yaw: 0)
+        left.observe(yaw: -0.3)
+        check(!left.isComplete, "Turning the wrong way doesn't complete the challenge")
+        left.observe(yaw: 0.12)
+        check(left.progress == 0.5, "Progress follows the turn")
+        left.observe(yaw: 0)
+        check(left.progress == 0.5, "Progress doesn't go backward")
+        left.observe(yaw: 0.3)
+        check(left.isComplete, "Turning far enough completes the challenge")
+
+        var right = HeadTurnChallenge(direction: .right)
+        right.observe(yaw: 0)
+        right.observe(yaw: -0.3)
+        check(right.isComplete, "A right turn uses negative yaw")
+
+        var alreadyTurned = HeadTurnChallenge(direction: .left)
+        alreadyTurned.observe(yaw: 0.4)
+        alreadyTurned.observe(yaw: 0.5)
+        check(!alreadyTurned.isComplete, "A head already turned the right way proves nothing")
+
+        var unknown = HeadTurnChallenge(direction: .left)
+        unknown.observe(yaw: nil)
+        check(unknown.progress == 0, "Unknown head pose doesn't count")
+
+        func frame(_ yaw: Float, eyes: CGFloat = 0.3, at time: Date) -> LivenessFrame {
+            LivenessFrame(
+                timestamp: time, landmarks: [], interocularDistance: nil, yaw: yaw,
+                leftEyeAspectRatio: eyes, rightEyeAspectRatio: eyes, noseOffsetRatio: nil,
+                hasReliableLandmarks: false, deviceOverlapFraction: nil
+            )
+        }
+
+        func makeGate() -> UnlockGate {
+            let analyzer = LivenessAnalyzer()
+            analyzer.modeProvider = { .challenge }
+            return UnlockGate(liveness: analyzer, challenge: HeadTurnChallenge(direction: .left))
+        }
+
+        var clock = start
+        func feed(_ gate: UnlockGate, _ faceClass: UnlockFaceClass, yaw: Float, eyes: [CGFloat]) -> UnlockGate.Decision {
+            var decision = UnlockGate.Decision.keepScanning
+            for openness in eyes {
+                clock += frameInterval
+                decision = gate.observeFace(faceClass, frame: frame(yaw, eyes: openness, at: clock), at: clock)
+                if case .unlock = decision { return decision }
+            }
+            return decision
+        }
+        let open: [CGFloat] = [0.3, 0.3, 0.3]
+
+        let blinkOnly = makeGate()
+        check(feed(blinkOnly, .match, yaw: 0, eyes: blinkEyes + open + open) == .keepScanning, "A blink alone can't pass the challenge")
+
+        let passes = makeGate()
+        _ = feed(passes, .match, yaw: 0, eyes: blinkEyes)
+        _ = feed(passes, .plausibleOwner, yaw: 0.3, eyes: open)
+        check(feed(passes, .match, yaw: 0, eyes: open) == .unlock(confirmedBy: .blink), "Proof of life, the turn, and a match unlock")
+
+        let turnOnly = makeGate()
+        _ = feed(turnOnly, .match, yaw: 0, eyes: open)
+        _ = feed(turnOnly, .match, yaw: 0.3, eyes: open)
+        check(feed(turnOnly, .match, yaw: 0, eyes: open + open) == .keepScanning, "The turn alone isn't proof of life")
+
+        let swapped = makeGate()
+        _ = feed(swapped, .match, yaw: 0, eyes: blinkEyes)
+        _ = feed(swapped, .plausibleOwner, yaw: 0.3, eyes: open)
+        _ = feed(swapped, .impostor, yaw: 0, eyes: [0.3])
+        check(swapped.challenge?.progress == 0, "A different face resets the challenge")
+        check(feed(swapped, .match, yaw: 0, eyes: open + open) == .keepScanning, "A different face must not inherit a completed turn")
     }
 
     @MainActor

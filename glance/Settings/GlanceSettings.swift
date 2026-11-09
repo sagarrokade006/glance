@@ -240,6 +240,15 @@ final class GlanceSettings {
 
     static let faceDetectionRange = 3...10
 
+    /// The head-turn challenge needs time to read the prompt and turn, so it never runs shorter than this.
+    private static let minimumChallengeSeconds = 8
+
+    /// How long a scan actually runs. Read by both the scan loop and the overlay so they stop together.
+    var scanSeconds: Int {
+        let usesChallenge = livenessChecksEnabled && livenessMode == .challenge && showUnlockAnimation
+        return usesChallenge ? max(faceDetectionSeconds, Self.minimumChallengeSeconds) : faceDetectionSeconds
+    }
+
     /// Which display Face Unlock shows on. `nil` means `NotchGeometry.preferredScreen()`'s
     /// default, re-evaluated live; a pinned display has deliberately no
     /// fallback if disconnected (see `FaceUnlockCoordinator.evaluateTrigger()`).

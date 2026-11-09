@@ -65,6 +65,47 @@ struct UnlockGatePolicy: Equatable {
     }
 }
 
+enum HeadTurnDirection: CaseIterable, Equatable {
+    case left
+    case right
+
+    var prompt: String { self == .left ? "Slowly turn left" : "Slowly turn right" }
+    var symbol: String { self == .left ? "arrow.left" : "arrow.right" }
+    /// Vision reports positive yaw for a head turned toward the left of the screen.
+    var yawSign: Float { self == .left ? 1 : -1 }
+}
+
+/// A random head-turn prompt, which a prerecorded video can't anticipate.
+struct HeadTurnChallenge: Equatable {
+    /// Matches the band enrollment already asks users to reach, about 14 degrees.
+    static let requiredTurn: Float = 0.24
+    /// The turn must start from here, so a head already turned the right way proves nothing.
+    static let centerLimit: Float = 0.12
+
+    let direction: HeadTurnDirection
+    private(set) var progress: Float = 0
+    private var sawCenter = false
+
+    init(direction: HeadTurnDirection) {
+        self.direction = direction
+    }
+
+    var isComplete: Bool { progress >= 1 }
+
+    mutating func observe(yaw: Float?) {
+        guard !isComplete, let yaw else { return }
+        let turn = yaw * direction.yawSign
+        if turn <= Self.centerLimit { sawCenter = true }
+        guard sawCenter else { return }
+        progress = max(progress, min(1, max(0, turn / Self.requiredTurn)))
+    }
+
+    mutating func reset() {
+        progress = 0
+        sawCenter = false
+    }
+}
+
 /// Binds recognition and liveness to one continuous presentation of the owner's face. One instance per scan.
 @MainActor
 final class UnlockGate {
@@ -83,10 +124,13 @@ final class UnlockGate {
     private var matchStreak = 0
     private var wrongFaceStartedAt: Date?
     private var lastFaceAt: Date?
+    /// `nil` unless the head-turn challenge is in use.
+    private(set) var challenge: HeadTurnChallenge?
 
-    init(policy: UnlockGatePolicy = .standard, liveness: LivenessAnalyzer?) {
+    init(policy: UnlockGatePolicy = .standard, liveness: LivenessAnalyzer?, challenge: HeadTurnChallenge? = nil) {
         self.policy = policy
         self.liveness = liveness
+        self.challenge = challenge
     }
 
     /// Call for each processed frame in which no usable face was found.
@@ -100,6 +144,12 @@ final class UnlockGate {
     func observeFace(_ faceClass: UnlockFaceClass, frame: LivenessFrame, at now: Date) -> Decision {
         breakContinuityIfGapExceeded(now)
         lastFaceAt = now
+
+        if faceClass == .impostor {
+            challenge?.reset()
+        } else {
+            challenge?.observe(yaw: frame.yaw)
+        }
 
         var isLive = liveness == nil
         var confirmingCue: LivenessCue?
@@ -129,7 +179,9 @@ final class UnlockGate {
             return .keepScanning
         }
         matchStreak += 1
-        guard matchStreak >= policy.requiredConsecutiveMatches, isLive else { return .keepScanning }
+        guard matchStreak >= policy.requiredConsecutiveMatches, isLive, challenge?.isComplete != false else {
+            return .keepScanning
+        }
         return .unlock(confirmedBy: confirmingCue)
     }
 
@@ -137,6 +189,7 @@ final class UnlockGate {
         guard let lastFaceAt, now.timeIntervalSince(lastFaceAt) > policy.maxFaceGap else { return }
         matchStreak = 0
         liveness?.resetConfirmation()
+        challenge?.reset()
     }
 }
 

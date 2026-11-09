@@ -80,7 +80,14 @@ struct NotchOverlayView: View {
     /// Onboarding always uses the full panel, and `.none` keeps the full expansion too
     /// (it only drops the video) — so this is specifically `.minimal` scan content.
     private var isMinimalScan: Bool {
-        onboardingController == nil && notice == nil && controller.activeUnlockStyle == .minimal
+        onboardingController == nil && !usesMessagePanel && controller.activeUnlockStyle == .minimal
+    }
+
+    private var usesMessagePanel: Bool { notice != nil || challengePrompt != nil }
+
+    private var challengePrompt: HeadTurnPrompt? {
+        if case .challenge(let prompt) = controller.content { return prompt }
+        return nil
     }
 
     private var notice: NotchNotice? {
@@ -111,7 +118,7 @@ struct NotchOverlayView: View {
 
     private var openBodySize: CGSize {
         if let onboardingController { return onboardingController.panelSize }
-        if notice != nil { return NotchMessageView.panelSize(closedHeight: style == .notch ? closedBodySize.height : 0) }
+        if usesMessagePanel { return NotchMessageView.panelSize(closedHeight: style == .notch ? closedBodySize.height : 0) }
         return isMinimalScan ? minimalOpenBodySize : scanOpenSize
     }
 
@@ -261,6 +268,9 @@ struct NotchOverlayView: View {
                 if let onboardingController {
                     // Onboarding's step views fill `panelSize` themselves — no shared padding here.
                     OnboardingNotchView(controller: onboardingController)
+                } else if let challengePrompt {
+                    NotchChallengeView(prompt: challengePrompt)
+                        .padding(.top, style == .notch ? closedBodySize.height : 0)
                 } else if let notice {
                     NotchMessageView(notice: notice)
                         .padding(.top, style == .notch ? closedBodySize.height : 0)
