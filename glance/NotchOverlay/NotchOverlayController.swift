@@ -39,11 +39,13 @@ final class NotchOverlayController {
     /// Kept as one enum (rather than two independent optionals) so exactly one is ever active.
     enum Content: Equatable {
         case scan(ScanMedia)
+        case notice(NotchNotice)
         case onboarding(OnboardingController)
 
         static func == (lhs: Content, rhs: Content) -> Bool {
             switch (lhs, rhs) {
             case (.scan(let a), .scan(let b)): return a == b
+            case (.notice(let a), .notice(let b)): return a == b
             case (.onboarding(let a), .onboarding(let b)): return a === b
             default: return false
             }
@@ -290,6 +292,22 @@ final class NotchOverlayController {
             guard let self else { return }
             try? await Task.sleep(for: hold)
             guard !Task.isCancelled else { return }
+            await self.collapse()
+        }
+    }
+
+    /// Explains why face unlock can't run, then collapses. Uses the failure phase, so hovering simply shows it again.
+    func showNotice(_ notice: NotchNotice) {
+        guard isArmed else { return }
+        resolveTask?.cancel()
+        scanTimeoutTask?.cancel()
+        geometry = windowController.currentGeometry
+        content = .notice(notice)
+        phase = .failure
+        updateInteractivity()
+        resolveTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, !Task.isCancelled else { return }
             await self.collapse()
         }
     }

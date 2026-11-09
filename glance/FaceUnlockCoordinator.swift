@@ -128,10 +128,6 @@ final class FaceUnlockCoordinator {
             statusMessage = "Face unlock is on, but no password is stored yet."
             return
         }
-        if let scanBlockedReason {
-            statusMessage = scanBlockedReason
-            return
-        }
 
         // A deselected trigger means "don't auto-scan for this signal," not "do nothing" — the user can still opt in by hand.
         let shouldAutoScan = GlanceSettings.shared.unlockTriggers.contains(signal)
@@ -150,17 +146,37 @@ final class FaceUnlockCoordinator {
     }
 
     /// Why no scan may start right now, if anything. Checked by every path that can start one.
-    private var scanBlockedReason: String? {
+    private var scanBlockedNotice: NotchNotice? {
         if pipeline.usingFallbackEmbedder {
-            return "Face unlock is off because the recognition model couldn't be loaded."
+            return NotchNotice(
+                symbol: "exclamationmark.triangle.fill",
+                title: "Face unlock unavailable",
+                detail: "The recognition model couldn't be loaded."
+            )
         }
         if PasswordHealthStore.shared.health.isStale {
-            return "Your stored password looks out of date — update it in Settings to use face unlock."
+            return NotchNotice(
+                symbol: "key.fill",
+                title: "Face unlock paused",
+                detail: "Your stored password looks out of date."
+            )
         }
         if attemptLimiter.isLockedOut {
-            return "Too many failed attempts — enter your password to use face unlock again."
+            return NotchNotice(
+                symbol: "lock.fill",
+                title: "Face unlock paused",
+                detail: "Too many failed attempts. Enter your password."
+            )
         }
         return nil
+    }
+
+    /// Records why no scan can run and, unless animations are off, explains it in the notch.
+    private func presentBlockedNotice(_ notice: NotchNotice) {
+        statusMessage = notice.statusText
+        if showsUI {
+            NotchOverlayController.shared.showNotice(notice)
+        }
     }
 
     /// Whether the last arm was recent enough to be part of the same wake burst rather than a new one.
@@ -211,8 +227,7 @@ final class FaceUnlockCoordinator {
               LockMonitor.isScreenActuallyLocked(),
               NotchGeometry.preferredScreen() != nil,
               SecureCredentialManager.isSessionUnlocked,
-              SecureCredentialManager.hasStoredPassword(),
-              scanBlockedReason == nil
+              SecureCredentialManager.hasStoredPassword()
         else { return }
 
         // Already looking — swallows auto-repeat/double-presses and lets "On wake"/"On lock" override "On space" with no special-casing.
@@ -250,10 +265,9 @@ final class FaceUnlockCoordinator {
     /// Called on arm, and again whenever the overlay hover-activates.
     private func startScanCycle() {
         guard passwordConfirmationTask == nil else { return }
-        // Hover and auto-retry reach here directly. Disarming removes the hover target instead of leaving a dead notch.
-        if let scanBlockedReason {
-            statusMessage = scanBlockedReason
-            NotchOverlayController.shared.disarm()
+        // Every path that can start a scan comes through here.
+        if let notice = scanBlockedNotice {
+            presentBlockedNotice(notice)
             return
         }
         scanTask?.cancel()
@@ -342,6 +356,17 @@ final class FaceUnlockCoordinator {
 
     /// `delay` waits out whatever the overlay is still showing so the retry doesn't start underneath the previous outcome.
     private func scheduleAutoRetryIfEnabled(after delay: Duration) {
+        // Reaching the limit explains itself as soon as the failure animation finishes, retry setting or not.
+        if attemptLimiter.isLockedOut {
+            autoRetryTask?.cancel()
+            autoRetryTask = Task { [weak self] in
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled, let self, LockMonitor.isScreenActuallyLocked(),
+                      let notice = self.scanBlockedNotice else { return }
+                self.presentBlockedNotice(notice)
+            }
+            return
+        }
         guard GlanceSettings.shared.autoRetryOnce, !hasAutoRetriedForCurrentLock else { return }
         hasAutoRetriedForCurrentLock = true
         autoRetryTask?.cancel()
@@ -374,8 +399,8 @@ final class FaceUnlockCoordinator {
                 store.health.recordEntryConfirmed(at: Date())
             case .stillLocked:
                 store.health.recordEntryStillLocked()
-                if let reason = self.scanBlockedReason {
-                    self.statusMessage = reason
+                if let notice = self.scanBlockedNotice {
+                    self.presentBlockedNotice(notice)
                 }
             case .inconclusive:
                 break
