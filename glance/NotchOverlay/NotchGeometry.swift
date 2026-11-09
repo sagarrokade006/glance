@@ -16,9 +16,24 @@ struct NotchGeometry {
 
     var style: NotchPanelStyle { isPhysicalNotch ? .notch : .pill }
 
-    /// Fixed footprint of expanded scan-mode content in notch style. Sized for the
-    /// square (432x432) scan animation plus breathing room. Pill has its own `pillOpenSize`.
-    static let notchOpenSize = CGSize(width: 220, height: 200)
+    /// Reserves window space for the expanded panel in notch style. The panel itself is sized from
+    /// the real camera housing by `notchScanOpenSize(closedSize:)`, and pill has its own `pillOpenSize`.
+    static let notchOpenSize = CGSize(width: 240, height: 200)
+
+    /// Extra width on each side of the camera housing, so the open panel always reads wider than the notch.
+    static let notchScanSideMargin: CGFloat = 18
+    /// Height below the camera housing: a 100pt scan animation plus `notchContentPaddingTop` and `Bottom`.
+    static let notchScanHeightBelowHousing: CGFloat = 116
+    /// Tighter than `openBottomRadius`, which is too round for a panel this short.
+    static let notchScanBottomRadius: CGFloat = 44
+    static let messagePanelCornerRadius: CGFloat = 30
+
+    static func notchScanOpenSize(closedSize: CGSize) -> CGSize {
+        CGSize(
+            width: closedSize.width + notchScanSideMargin * 2,
+            height: closedSize.height + notchScanHeightBelowHousing
+        )
+    }
 
     /// Corner radii for the notch silhouette. The top radius doubles as the
     /// width of the outward flare on each side (see NotchShape).
@@ -43,7 +58,7 @@ struct NotchGeometry {
     static let pillClosedSize = CGSize(width: 80, height: 24)
 
     /// Independent of `notchOpenSize`; larger by default since the pill has no camera housing.
-    static let pillOpenSize = CGSize(width: 180, height: 180)
+    static let pillOpenSize = CGSize(width: 160, height: 160)
 
     /// Never zero — the whole point of the pill is that it's detached from the edge.
     static let pillTopGap: CGFloat = 3
@@ -59,10 +74,10 @@ struct NotchGeometry {
     static let pillOffscreenSlack: CGFloat = 20
 
     /// Pill's equivalent of `notchContentPadding*` below, independent so it can be tuned separately.
-    static let pillContentPaddingTop: CGFloat = 32
-    static let pillContentPaddingLeading: CGFloat = 32
-    static let pillContentPaddingTrailing: CGFloat = 32
-    static let pillContentPaddingBottom: CGFloat = 32
+    static let pillContentPaddingTop: CGFloat = 30
+    static let pillContentPaddingLeading: CGFloat = 30
+    static let pillContentPaddingTrailing: CGFloat = 30
+    static let pillContentPaddingBottom: CGFloat = 30
 
     // MARK: - Panel open/close springs — EDIT HERE
     //
@@ -150,10 +165,11 @@ struct NotchGeometry {
     static let scanPulseStartDelay: Double = 0.6
 
     /// Notch-style padding around scan-mode content. Pill has its own independent set below.
-    static let notchContentPaddingTop: CGFloat = 26
-    static let notchContentPaddingLeading: CGFloat = 40
-    static let notchContentPaddingTrailing: CGFloat = 40
-    static let notchContentPaddingBottom: CGFloat = 30
+    /// Measured from the bottom of the camera housing.
+    static let notchContentPaddingTop: CGFloat = 8
+    static let notchContentPaddingLeading: CGFloat = 20
+    static let notchContentPaddingTrailing: CGFloat = 20
+    static let notchContentPaddingBottom: CGFloat = 8
 
     /// Cosmetic size bump applied on hover in NotchOverlayView. Included here so the
     /// fixed window has margin for it instead of clipping.

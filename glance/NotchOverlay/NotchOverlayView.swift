@@ -96,7 +96,7 @@ struct NotchOverlayView: View {
     }
 
     private var scanOpenSize: CGSize {
-        style == .notch ? NotchGeometry.notchOpenSize : NotchGeometry.pillOpenSize
+        style == .notch ? NotchGeometry.notchScanOpenSize(closedSize: closedBodySize) : NotchGeometry.pillOpenSize
     }
 
     /// In notch style the width grows to add flanking black beside the physical cutout;
@@ -118,7 +118,7 @@ struct NotchOverlayView: View {
 
     private var openBodySize: CGSize {
         if let onboardingController { return onboardingController.panelSize }
-        if usesMessagePanel { return NotchMessageView.panelSize(closedHeight: style == .notch ? closedBodySize.height : 0) }
+        if usesMessagePanel { return NotchMessageView.panelSize(closedSize: style == .notch ? closedBodySize : nil) }
         return isMinimalScan ? minimalOpenBodySize : scanOpenSize
     }
 
@@ -134,6 +134,7 @@ struct NotchOverlayView: View {
                     ? NotchGeometry.minimalNotchTopRadius
                     : minimalOpenBodySize.height / 2
             }
+            if style == .pill, usesMessagePanel { return NotchGeometry.messagePanelCornerRadius }
             return style == .notch ? NotchGeometry.openTopRadius : NotchGeometry.pillOpenCornerRadius
         }
         // Half the height is exactly a capsule end, in pill style.
@@ -147,11 +148,12 @@ struct NotchOverlayView: View {
                     ? NotchGeometry.minimalNotchBottomRadius
                     : minimalOpenBodySize.height / 2
             }
+            if usesMessagePanel { return NotchGeometry.messagePanelCornerRadius }
             guard style == .notch else {
                 // Uniform corners in pill style — no flare to balance, unlike the notch.
                 return NotchGeometry.pillOpenCornerRadius
             }
-            return onboardingController?.panelBottomRadius ?? NotchGeometry.openBottomRadius
+            return onboardingController?.panelBottomRadius ?? NotchGeometry.notchScanBottomRadius
         }
         return style == .notch ? NotchGeometry.closedBottomRadius : closedBodySize.height / 2
     }
@@ -186,7 +188,7 @@ struct NotchOverlayView: View {
     }
 
     private var scanContentPaddingTop: CGFloat {
-        style == .pill ? NotchGeometry.pillContentPaddingTop : NotchGeometry.notchContentPaddingTop
+        style == .pill ? NotchGeometry.pillContentPaddingTop : closedBodySize.height + NotchGeometry.notchContentPaddingTop
     }
 
     private var scanContentPaddingLeading: CGFloat {
